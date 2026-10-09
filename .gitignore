@@ -1,0 +1,15 @@
+# 构建产物
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# 日志
+*.log
+
+# WorkBuddy 工作区数据（tool-generated，不入 git）
+.workbuddy/

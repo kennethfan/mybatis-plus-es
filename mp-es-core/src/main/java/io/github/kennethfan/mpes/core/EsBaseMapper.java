@@ -1,0 +1,49 @@
+package io.github.kennethfan.mpes.core;
+
+import io.github.kennethfan.mpes.page.Page;
+import io.github.kennethfan.mpes.wrapper.EsLambdaQueryWrapper;
+
+import java.io.Serializable;
+import java.util.Collection;
+import java.util.List;
+
+/**
+ * 实体 Mapper 的通用 CRUD 接口：方法签名对齐 MP 的 BaseMapper（ADR-0002：仅 API 对齐，不进 MyBatis 管线）。
+ *
+ * @param <T> 实体类型
+ */
+public interface EsBaseMapper<T> {
+
+    /** 新增一条文档（主键必填，作为 ES _id） */
+    int insert(T entity);
+
+    /** 批量新增，返回成功数 */
+    int insertBatch(Collection<T> entities);
+
+    /** 按主键删除，命中返回 1 否则 0 */
+    int deleteById(Serializable id);
+
+    /** 批量删除，返回删除数 */
+    int deleteBatchIds(Collection<? extends Serializable> idList);
+
+    /** 按主键更新非 null 字段（部分更新），命中返回 1 否则 0 */
+    int updateById(T entity);
+
+    /** 按主键查询 */
+    T selectById(Serializable id);
+
+    /** 按主键集合查询 */
+    List<T> selectBatchIds(Collection<? extends Serializable> idList);
+
+    /** 条件计数，wrapper 为 null 时全量计数 */
+    Long selectCount(EsLambdaQueryWrapper<T> wrapper);
+
+    /** 条件查询，wrapper 为 null 时查全量（上限 1000 条） */
+    List<T> selectList(EsLambdaQueryWrapper<T> wrapper);
+
+    /** 条件查单条：0 条返回 null，多条抛 {@link io.github.kennethfan.mpes.support.EsOpsException} */
+    T selectOne(EsLambdaQueryWrapper<T> wrapper);
+
+    /** 分页查询（from+size，窗口上限 10000） */
+    Page<T> selectPage(Page<T> page, EsLambdaQueryWrapper<T> wrapper);
+}

@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: mp-es-sample
+
+# mp-es 配置（EsProperties，Q21）
+mp-es:
+  uris:
+    - http://localhost:9200
+  # username: elastic          # 可选 Basic 认证
+  # password: changeme
+  index:
+    auto-create: true          # 启动时 create-if-absent
+    mismatch-policy: WARN      # mapping 不一致策略：WARN（默认）/ FAIL
+
+logging:
+  level:
+    io.github.kennethfan.mpes: INFO
