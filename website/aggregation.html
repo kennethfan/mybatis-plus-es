@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>聚合 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html" class="active">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>聚合</h1>
+<p class="lead">aggregate 独立方法：只聚合不返回文档（size=0）。7 种聚合 + 任意深度子聚合。</p>
+
+<h2>基础聚合</h2>
+<pre><code>EsAggResult result = mapper.aggregate(
+        new EsLambdaQueryWrapper&lt;Product&gt;().le(Product::getPrice, new BigDecimal("3000")),
+        EsAgg.terms(Product::getOnSale),            // 分组计数
+        EsAgg.avg(Product::getPrice).as("avgPrice"),// 平均
+        EsAgg.max(Product::getPrice),               // 最大
+        EsAgg.min(Product::getStock),               // 最小
+        EsAgg.sum(Product::getStock),               // 求和
+        EsAgg.stats(Product::getStock),             // count/min/max/avg/sum
+        EsAgg.cardinality(Product::getProductName));// 去重计数
+
+result.buckets("onSale");        // terms 桶：List&lt;EsBucket&gt;（getKey / getCount / getAggs）
+result.value("avgPrice");        // 单值 Double（avg/max/min/sum/cardinality）
+result.stats("stock");           // EsStats：getCount/getMin/getMax/getAvg/getSum</code></pre>
+<h2>命名规则</h2>
+<ul>
+  <li>未 <code>as()</code> 显式命名时，聚合名默认为<b>属性名</b>（非 ES 字段名）</li>
+  <li>terms 桶数默认上限 100</li>
+</ul>
+
+<h2>子聚合（subAgg）</h2>
+<pre><code>EsAggResult sub = mapper.aggregate(null,
+        EsAgg.terms(Product::getOnSale).subAgg(
+                EsAgg.avg(Product::getPrice).as("avgPrice"),
+                EsAgg.max(Product::getPrice).as("maxPrice")));
+
+for (EsBucket bucket : sub.buckets("onSale")) {
+    double avg = bucket.getAggs().value("avgPrice");   // 桶内取子结果
+}</code></pre>
+<ul>
+  <li>子聚合挂在任意聚合上，支持任意深度链式嵌套</li>
+  <li>子聚合名在每桶内独立命名</li>
+</ul>
+
+<div class="warn"><b>⚠️</b> boolean 字段的 terms 桶键为 ES 原生数值语义：<code>true → 1</code>、<code>false → 0</code>（getKey 为 Long）。</div>
+<nav class="pager"><a href="highlight.html">← 高亮</a>
+<a href="geo.html">Geo →</a></nav></main>
+</div>
+</body>
+</html>

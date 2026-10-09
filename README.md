@@ -4,6 +4,8 @@
 
 以 **MyBatis-Plus 风格 API 操作 Elasticsearch** 的适配层：沿用 MP 的 Mapper / Wrapper 写法，底层直连 Elasticsearch 官方 Java API Client，**不经过任何 MyBatis 执行机制**（ADR-0002）。
 
+📖 **在线文档**：<https://kennethfan.github.io/mybatis-plus-es/>（源码在 [website/](website/)，push 到 main 后 GitHub Actions 自动发布）
+
 - 构建状态：`mvn clean verify` 全绿（单元测试 6/6 + 集成测试 16/16 @ 真实 ES 8.19.0）
 - 版本基线：Spring Boot 3.5.16 / elasticsearch-java 8.19.23 / mybatis-plus-annotation 3.5.17 / JDK 17
 

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nested · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html" class="active">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>Nested</h1>
+<p class="lead">@EsNested 子文档：声明、查询、回显全链路；inner 条件自动加全路径前缀。</p>
+
+<h2>声明</h2>
+<pre><code>@EsNested
+private List&lt;Sku&gt; skus;          // List&lt;子实体&gt; 或单个子实体</code></pre><pre><code>@Data
+public class Sku {
+    @TableId
+    private String skuCode;      // 子实体需主键字段；无需 @TableName
+    private String spec;
+    private Integer quantity;
+}</code></pre>
+<h2>子文档条件</h2>
+<pre><code>// childType 为类型见证，保证 lambda 方法引用获得正确类型
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .nested(Product::getSkus, Sku.class, w -&gt; w.eq(Sku::getSkuCode, "SKU-A1")));
+
+// 子文档内多条件（AND 语义一致）
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .nested(Product::getSkus, Sku.class,
+                w -&gt; w.eq(Sku::getSpec, "4K").le(Sku::getQuantity, 5)));
+
+// 与顶层条件组合
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .nested(Product::getSkus, Sku.class, w -&gt; w.eq(Sku::getSkuCode, "SKU-A1"))
+        .eq(Product::getOnSale, true));</code></pre>
+<h2>关键机制</h2>
+<ul>
+  <li><b>全路径前缀</b>：inner 条件字段自动转为 <code>skus.skuCode</code> 完整路径（ES nested 查询硬性要求），支持 nested 套 nested 递归</li>
+  <li><b>双向重命名</b>：子文档写入/读取时字段名与 ES 字段名双向映射（@TableField 在子实体上同样生效），往返无损</li>
+  <li><b>类型校验</b>：非 nested 字段使用 nested() 直接报错；循环引用在解析期报错</li>
+</ul>
+
+<div class="tip"><b>💡</b> 为什么用 nested 而不是 object：object 类型会拍平数组导致跨对象条件错误匹配；nested 独立索引每个子文档，条件隔离精确。</div>
+<nav class="pager"><a href="geo.html">← Geo</a>
+<a href="configuration.html">配置参考 →</a></nav></main>
+</div>
+</body>
+</html>

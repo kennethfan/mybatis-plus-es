@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>条件查询 Wrapper · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html" class="active">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>条件查询 Wrapper</h1>
+<p class="lead">EsLambdaQueryWrapper：Lambda 链式构造，编译期字段安全；语义与 MP 对齐并针对 ES 特性扩展。</p>
+
+<h2>全操作符</h2>
+<table>
+  <tr><th>方法</th><th>适用字段</th><th>ES DSL</th><th>说明</th></tr>
+  <tr><td>eq / ne</td><td>keyword/数值/布尔/date</td><td>term / mustNot term</td><td>text 字段报错，请用 match</td></tr>
+  <tr><td>in</td><td>同 eq</td><td>terms</td><td></td></tr>
+  <tr><td>gt / ge / lt / le</td><td>数值/date</td><td>range</td><td></td></tr>
+  <tr><td>between</td><td>数值/date</td><td>range gte+lte</td><td></td></tr>
+  <tr><td>like</td><td>keyword</td><td>wildcard *v*</td><td>通配符；前缀场景建议 prefix（更快）</td></tr>
+  <tr><td>match</td><td>text/keyword</td><td>match</td><td>显式分词检索入口</td></tr>
+  <tr><td>isNull</td><td>任意</td><td>mustNot exists</td><td></td></tr>
+  <tr><td>geoDistance</td><td>geo_point</td><td>geo_distance</td><td>见 <a href="geo.html">Geo</a></td></tr>
+  <tr><td>nested(col, Child.class, w)</td><td>nested</td><td>nested</td><td>见 <a href="nested.html">Nested</a></td></tr>
+</table>
+
+<h2>优先级：AND 高于 OR</h2>
+<p>与 SQL 一致：AND 先结合。引擎按 OR 边界切分为若干 AND 桶，桶间 should 连接：</p>
+<pre><code>// a.eq(1).or().eq(2).eq(3)  →  (1 OR 2) AND 3
+new EsLambdaQueryWrapper&lt;Product&gt;()
+        .eq(Product::getOnSale, false)
+        .or()
+        .le(Product::getPrice, new BigDecimal("200"))
+        .ge(Product::getStock, 50);</code></pre>
+<h2>嵌套分组</h2>
+<pre><code>// onSale=false OR (price&lt;=200 AND stock&gt;=50)
+new EsLambdaQueryWrapper&lt;Product&gt;()
+        .eq(Product::getOnSale, false)
+        .or(w -&gt; w.le(Product::getPrice, new BigDecimal("200"))
+                  .ge(Product::getStock, 50));</code></pre>
+<h2>排序</h2>
+<pre><code>new EsLambdaQueryWrapper&lt;Product&gt;()
+        .orderByAsc(Product::getPrice)
+        .orderByDesc(Product::getStock)
+        .orderByGeoDistance(Product::getLocation, new GeoPoint(39.90, 116.40), true);</code></pre>
+<h2>空 wrapper 语义</h2>
+<ul>
+  <li>查询侧（selectList / selectCount / selectPage 等）：wrapper 传 <code>null</code> = 全量（match_all）</li>
+  <li>写侧（delete / update）：wrapper 为 null 或空条件<b>直接抛异常</b>（防全量误删误改）</li>
+</ul>
+<nav class="pager"><a href="crud.html">← CRUD 与条件写</a>
+<a href="search-enhanced.html">查询增强 →</a></nav></main>
+</div>
+</body>
+</html>

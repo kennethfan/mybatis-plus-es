@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>概览 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html" class="active">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>mybatis-plus-es</h1>
+<p class="lead">以 <b>MyBatis-Plus 风格 API 操作 Elasticsearch</b>：沿用 MP 的 Mapper / Wrapper 写法，底层直连 Elasticsearch 官方 Java API Client，<b>不经过任何 MyBatis 执行机制</b>。</p>
+
+<h2>特性</h2>
+<div class="grid">
+  <div class="card"><b>API 对齐 MP</b><span>EsBaseMapper 签名与 LambdaQueryWrapper 写法对齐 BaseMapper，MyBatis-Plus 用户零学习成本</span></div>
+  <div class="card"><b>无 MyBatis 管线</b><span>JDK 动态代理直连 elasticsearch-java，仅复用 MP 注解作映射来源</span></div>
+  <div class="card"><b>Index 托管</b><span>启动时 create-if-absent + mapping 一致性校验（WARN / FAIL）</span></div>
+  <div class="card"><b>完整写路径</b><span>insert / update / delete 全家桶：按主键、批量、按条件（update_by_query / delete_by_query）</span></div>
+  <div class="card"><b>深分页</b><span>search_after 游标翻页，无 10000 窗口限制，不重不漏</span></div>
+  <div class="card"><b>聚合与高亮</b><span>7 种聚合 + 任意深度子聚合；selectHighlighted 返回实体 + 片段</span></div>
+  <div class="card"><b>Geo 与 Nested</b><span>geo_point 过滤/距离排序；@EsNested 子文档条件、双向字段重命名、inner 查询全路径自动前缀</span></div>
+  <div class="card"><b>库即 Starter</b><span>依赖即生效（AutoConfiguration.imports），客户端专用 ObjectMapper 不污染应用配置</span></div>
+</div>
+
+<h2>最小示例</h2>
+<pre><code>@SpringBootApplication
+@EsMapperScan("com.example.mapper")          // 对齐 @MapperScan 体验
+public class App { ... }
+
+@Data
+@TableName("mpes_product")                   // 索引名
+public class Product {
+    @TableId                                 // 文档 _id
+    private Long id;
+    @TableField("product_name")
+    private String productName;              // String → keyword
+    @EsText(analyzer = "standard")
+    private String description;              // → text
+    private BigDecimal price;                // → double
+    @EsGeoPoint
+    private GeoPoint location;               // → geo_point
+    @EsNested
+    private List&lt;Sku&gt; skus;                  // → nested
+}
+
+public interface ProductMapper extends EsBaseMapper&lt;Product&gt; {}
+
+// 与 MP 一致的写法
+List&lt;Product&gt; list = mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .eq(Product::getOnSale, true)
+        .gt(Product::getPrice, new BigDecimal("200"))
+        .match(Product::getDescription, "键盘")
+        .orderByDesc(Product::getPrice));</code></pre>
+
+<h2>版本基线</h2>
+<table>
+  <tr><th>组件</th><th>版本</th></tr>
+  <tr><td>JDK</td><td>17+</td></tr>
+  <tr><td>Spring Boot</td><td>3.5.x</td></tr>
+  <tr><td>elasticsearch-java</td><td>8.19.x（锚定 ES 8.x 服务端）</td></tr>
+  <tr><td>mybatis-plus-annotation</td><td>3.5.x（仅注解载荷）</td></tr>
+</table>
+
+<div class="tip"><b>💡</b> 设计决策与术语见仓库 <code>docs/adr/</code>（ADR-0001 ~ 0004）与 <code>CONTEXT.md</code>。</div>
+<nav class="pager"><span></span>
+<a href="quick-start.html">快速开始 →</a></nav></main>
+</div>
+</body>
+</html>

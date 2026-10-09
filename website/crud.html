@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRUD 与条件写 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html" class="active">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>CRUD 与条件写</h1>
+<p class="lead">写路径完整闭环：按主键、批量、按条件三类；条件写复用 Wrapper 语义。</p>
+
+<h2>方法清单</h2>
+<table>
+  <tr><th>方法</th><th>底层</th><th>语义</th></tr>
+  <tr><td>insert(entity)</td><td>index API</td><td>新增一条，主键作为 _id</td></tr>
+  <tr><td>insertBatch(coll)</td><td>bulk</td><td>批量新增；部分失败整体抛异常</td></tr>
+  <tr><td>updateById(entity)</td><td>update API</td><td>按主键部分更新（非 null 字段）</td></tr>
+  <tr><td>updateBatchById(coll)</td><td>bulk update</td><td>批量按主键部分更新（每条取非 null 字段）</td></tr>
+  <tr><td>update(patch, wrapper)</td><td>update_by_query + painless script</td><td>按条件部分更新，返回实际更新数</td></tr>
+  <tr><td>deleteById(id)</td><td>delete API</td><td>按主键删除，命中 1 否则 0</td></tr>
+  <tr><td>deleteBatchIds(ids)</td><td>delete_by_query</td><td>按主键集合删除</td></tr>
+  <tr><td>delete(wrapper)</td><td>delete_by_query</td><td>按条件删除，返回实际删除数</td></tr>
+</table>
+
+<h2>条件删除 / 条件更新</h2>
+<pre><code>// 条件删除：下架商品删除
+mapper.delete(new EsLambdaQueryWrapper&lt;Product&gt;().eq(Product::getOnSale, false));
+
+// 条件更新：在售商品全部改价（patch 取非 null 字段）
+Product patch = new Product();
+patch.setPrice(new BigDecimal("500"));
+mapper.update(patch, new EsLambdaQueryWrapper&lt;Product&gt;()
+        .eq(Product::getOnSale, true));
+
+// 条件更新可与 nested / geo 条件自由组合
+mapper.update(patch2, new EsLambdaQueryWrapper&lt;Product&gt;()
+        .nested(Product::getSkus, Sku.class, w -&gt; w.eq(Sku::getSkuCode, "SKU-C3")));</code></pre>
+
+<h2>安全与一致性语义</h2>
+<div class="warn"><b>⚠️</b> <code>delete(null)</code> / <code>update(patch, null)</code> / <b>空条件 wrapper</b> 一律抛
+<code>EsOpsException</code>——拒绝全量误删误改。</div>
+<ul>
+  <li>条件删除/更新统一 <code>conflicts=proceed</code>：目标刚被并发修改时跳过该条而非整体 409 失败</li>
+  <li>统一 <code>refresh=true</code>：操作完成后立即可检索，返回值为<b>实际影响条数</b></li>
+  <li>条件更新的 script：<code>ctx._source['es字段'] = params.pN</code>，字段值格式与 updateById 完全一致</li>
+  <li>updateBatchById / insertBatch：bulk 部分失败整体抛 <code>EsOpsException</code>（明确报错而非静默半成功）</li>
+</ul>
+<nav class="pager"><a href="index-management.html">← Index 托管</a>
+<a href="wrapper.html">条件查询 Wrapper →</a></nav></main>
+</div>
+</body>
+</html>

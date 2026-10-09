@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Index 托管 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html" class="active">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>Index 托管</h1>
+<p class="lead">对标 MP 的表结构托管：应用启动时保证索引存在且 mapping 与实体一致。</p>
+
+<h2>行为</h2>
+<ul>
+  <li><b>create-if-absent</b>：索引不存在 → 按实体元数据创建（含 nested / geo_point 递归展开）</li>
+  <li><b>mapping 校验</b>：索引已存在 → 逐字段比对类型；nested / geo_point 一并参与校验</li>
+  <li>开关：<code>mp-es.index.auto-create</code>（默认 true）</li>
+</ul>
+
+<h2>mismatch-policy</h2>
+<table>
+  <tr><th>策略</th><th>行为</th></tr>
+  <tr><td><code>WARN</code>（默认）</td><td>mapping 不一致时打印警告，不阻断启动</td></tr>
+  <tr><td><code>FAIL</code></td><td>直接抛异常，阻断启动（适合强约束环境）</td></tr>
+</table>
+
+<h2>mapping 演进（当前约束）</h2>
+<p>ES 不支持修改已有字段类型。实体字段类型变更后需<b>删除旧索引重建</b>（数据需自行迁移）：</p>
+<pre><code>curl -X DELETE localhost:9200/mpes_product</code></pre>
+<div class="tip"><b>💡</b> alias 切换 + reindex 的零停机重建在 Roadmap 中（见 <a href="roadmap.html">Roadmap</a>）。</div>
+<nav class="pager"><a href="entity-mapping.html">← 实体映射</a>
+<a href="crud.html">CRUD 与条件写 →</a></nav></main>
+</div>
+</body>
+</html>

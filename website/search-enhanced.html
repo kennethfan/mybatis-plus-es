@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>查询增强 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html" class="active">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>查询增强</h1>
+<p class="lead">multiMatch / fuzzy / prefix / boost：打分与容错场景的检索补强。</p>
+
+<h2>multiMatch 跨字段检索</h2>
+<pre><code>// 值在前，字段 varargs 在后
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .multiMatch("静音", Product::getProductName, Product::getDescription));
+
+// 带权重
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .multiMatch(2.0f, "静音", Product::getProductName, Product::getDescription));</code></pre>
+<p>默认 <code>best_fields</code>；字段名经 resolver 转换（nested 内自动带全路径前缀）。</p>
+
+<h2>fuzzy 容错</h2>
+<pre><code>// 默认 AUTO：3-5 字符容 1 级编辑距离，6+ 字符容 2 级
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .fuzzy(Product::getProductName, "机械键盘 K871"));   // 距离 1 → 命中 "机械键盘 K870"
+
+// 显式最大编辑距离
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .fuzzy(Product::getProductName, "机械键盘 K871", 1));</code></pre>
+<div class="warn"><b>⚠️</b> fuzzy 为 term 级容错——keyword 字段是<b>整词</b>比较，"K860" 与 "机械键盘 K870" 距离过远不会命中。</div>
+
+<h2>prefix 前缀</h2>
+<pre><code>mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .prefix(Product::getProductName, "机械"));   // 原生 prefix 查询，优于 like("机械*") 通配符</code></pre>
+<h2>boost 权重</h2>
+<pre><code>// 仅打分类条件提供重载：or 场景调整相关性排序
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .match(Product::getDescription, "键盘", 10f)   // 键盘 加权 → 对应文档排前
+        .or()
+        .match(Product::getDescription, "鼠标"));</code></pre>
+<p>term / range / like 等过滤类条件不提供 boost（filter 场景无打分意义）。</p>
+
+<h2>keyword / text 适用矩阵</h2>
+<table>
+  <tr><th>操作</th><th>keyword</th><th>text</th></tr>
+  <tr><td>eq / ne / in</td><td>✅</td><td>❌ 用 match</td></tr>
+  <tr><td>like（通配）</td><td>✅</td><td>❌ 用 match</td></tr>
+  <tr><td>prefix</td><td>✅</td><td>❌ 用 match</td></tr>
+  <tr><td>fuzzy</td><td>✅（整词容错）</td><td>❌ 用 match</td></tr>
+  <tr><td>match / multiMatch</td><td>⚠️ 整词匹配（少用）</td><td>✅</td></tr>
+</table>
+<nav class="pager"><a href="wrapper.html">← 条件查询 Wrapper</a>
+<a href="pagination.html">分页与深分页 →</a></nav></main>
+</div>
+</body>
+</html>

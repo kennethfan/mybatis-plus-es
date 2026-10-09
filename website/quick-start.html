@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>快速开始 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html" class="active">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>快速开始</h1>
+<p class="lead">5 分钟跑通：起 ES → 引依赖 → 声明实体与 Mapper → 配置 → 使用。</p>
+
+<h2>1. 启动 ES（本地开发）</h2>
+<pre><code>docker compose -f mp-es-sample/docker/docker-compose.yml up -d
+# ES 8.19 单节点（:9200），数据持久化到命名卷 mpes-es-data
+# + Kibana（:5601，已关闭安全认证）</code></pre>
+<h2>2. 引入依赖</h2>
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;io.github.kennethfan&lt;/groupId&gt;
+    &lt;artifactId&gt;mp-es-core&lt;/artifactId&gt;
+    &lt;version&gt;0.1.0-SNAPSHOT&lt;/version&gt;
+&lt;/dependency&gt;</code></pre>
+<div class="warn"><b>⚠️</b> <code>mybatis-plus-annotation</code> 将 <code>org.mybatis:mybatis</code> 声明为 optional，
+但其注解默认值引用了 <code>JdbcType</code>——运行时解析注解必须能加载该类。mp-es-core 已显式引入 mybatis 3.5.19，
+<b>仅作为注解解析载荷，无任何 MyBatis 执行路径</b>。</div>
+
+<h2>3. 声明实体与 Mapper</h2>
+<pre><code>@Data
+@TableName("mpes_product")
+public class Product {
+    @TableId
+    private Long id;
+    @TableField("product_name")
+    private String productName;
+    @EsText(analyzer = "standard")
+    private String description;
+    private BigDecimal price;
+    private Integer stock;
+    private LocalDate launchDate;
+    private Boolean onSale;
+    @EsGeoPoint
+    private GeoPoint location;
+    @EsNested
+    private List&lt;Sku&gt; skus;
+}
+
+public interface ProductMapper extends EsBaseMapper&lt;Product&gt; {}</code></pre>
+<h2>4. 启用扫描与配置</h2>
+<pre><code>@SpringBootApplication
+@EsMapperScan("com.example.mapper")
+public class App { ... }</code></pre><pre><code>mp-es:
+  uris: [http://localhost:9200]
+  index:
+    auto-create: true        # 启动时 create-if-absent
+    mismatch-policy: WARN    # mapping 不一致：WARN（默认）/ FAIL</code></pre>
+<h2>5. 使用</h2>
+<pre><code>ProductMapper mapper = applicationContext.getBean(ProductMapper.class);
+
+mapper.insert(product);                       // 增
+mapper.updateById(patch);                     // 改（非 null 字段部分更新）
+mapper.deleteById(id);                        // 删
+Product p = mapper.selectById(id);            // 查
+
+List&lt;Product&gt; list = mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .eq(Product::getOnSale, true)
+        .like(Product::getProductName, "键盘")
+        .match(Product::getDescription, "静音")
+        .orderByDesc(Product::getPrice));</code></pre>
+<div class="tip"><b>💡</b> 集成测试参考 <code>mp-es-sample</code>：16 个测试覆盖全部能力，可直接对照学习。</div>
+<nav class="pager"><a href="index.html">← 概览</a>
+<a href="entity-mapping.html">实体映射 →</a></nav></main>
+</div>
+</body>
+</html>
