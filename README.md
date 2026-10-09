@@ -231,12 +231,28 @@ mvn clean verify            # 单元测试无需 ES；集成测试在 ES 未启�
 
 GitHub Actions（[.github/workflows/ci.yml](.github/workflows/ci.yml)）：push 到 main / PR 触发，JDK 17 + `services` 起 ES 8.19.0 容器（healthcheck 等待就绪），执行 `mvn verify` 全量验证——与本地验证语义一致。
 
-## 发布（Maven Central 准备）
+## 发布（Maven Central）
 
-发布元数据已就位（licenses / developers / scm / distributionManagement → Central Portal，License Apache-2.0）。实际发布步骤（需要 Central Portal 账号与 GPG 密钥，另行操作）：
+发布元数据已就位（licenses / developers / scm，License Apache-2.0）。**打 tag 自动发布**：
 
 ```bash
-mvn -Prelease deploy        # -Prelease 激活 sources + javadoc + gpg 签名；仅 mp-es-core 发布（sample 已 skip deploy）
+git tag v0.2.0 && git push origin v0.2.0
+# GitHub Actions（.github/workflows/release.yml）自动：
+#   标签名 → 版本号（versions:set 全模块替换）→ GPG 签名 → Central 上传 → autoPublish 自动发布 → 建 GitHub Release
+```
+
+前置 secrets（仓库 Settings → Secrets and variables → Actions）：
+
+| Secret | 内容 |
+|---|---|
+| `GPG_PRIVATE_KEY` | `gpg --armor --export-secret-keys <指纹>` 的完整输出 |
+| `GPG_PASSPHRASE` | GPG 密钥口令 |
+| `MAVEN_CENTRAL_USERNAME` / `MAVEN_CENTRAL_PASSWORD` | Central Portal 的 User Token |
+
+本地手动发布（等价路径，需要 `~/.m2/settings.xml` 配 `id=central` 的 token）：
+
+```bash
+mvn -Prelease deploy        # sources + javadoc + gpg 签名 + Central 上传，仅 mp-es-core 发布
 ```
 
 发布校验（无需账号，本地可跑）：
