@@ -1,0 +1,13 @@
+# 本地开发专用 Kibana 配置（docker-compose 挂载）
+server.host: "0.0.0.0"
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+
+# 注意：Kibana 8 已移除 xpack.security.enabled 配置项（安全强制启用，随 ES 侧状态而定），
+# ES 侧已设 xpack.security.enabled=false，Kibana 无需也不能配置该项。
+
+# Streams/Alerts 插件必需的加密密钥（本地开发固定值，生产环境必须另行生成：
+# bin/kibana-encryption-keys generate）
+xpack.encryptedSavedObjects.encryptionKey: "mpes-local-dev-encryption-key-0123456789abcdef"
+
+# 本地开发用不到 Fleet（安全关闭后其 authz 轮询会持续刷 INFO 日志）
+xpack.fleet.enabled: false

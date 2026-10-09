@@ -31,16 +31,18 @@ mybatis-plus-es/
 │       ├── support/                 # LambdaUtils / MismatchPolicy / EsOpsException
 │       └── wrapper/                 # EsLambdaQueryWrapper + ES DSL 翻译器
 ├── mp-es-sample/                    # 示例应用（Product 实体 + 集成测试）
-├── docs/adr/                        # 架构决策记录
-└── docker-compose.yml               # ES 8.19 单节点 + Kibana（本地开发）
+│   └── docker/                      # 本地环境：docker-compose.yml + kibana.yml（仅 sample 测试需要）
+└── docs/adr/                        # 架构决策记录
 ```
 
 ## 快速上手
 
-### 1. 启动 ES
+### 1. 启动 ES（仅 sample 需要）
 
 ```bash
-docker compose up -d        # ES 8.19 单节点 + Kibana（:5601），已关闭安全认证
+docker compose -f mp-es-sample/docker/docker-compose.yml up -d
+# ES 8.19 单节点（:9200，数据持久化到命名卷 mpes-es-data）
+# + Kibana（:5601，配置见 mp-es-sample/docker/kibana.yml，已关闭安全认证）
 ```
 
 ### 2. 引入依赖
