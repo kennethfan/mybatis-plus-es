@@ -70,7 +70,10 @@ public class EsMapperProxy<T> implements InvocationHandler {
             case "insertBatch" -> insertBatch(args[0]);
             case "deleteById" -> deleteById((Serializable) args[0]);
             case "deleteBatchIds" -> deleteBatchIds(args[0]);
+            case "delete" -> deleteByCondition((EsLambdaQueryWrapper<?>) args[0]);
             case "updateById" -> updateById(args[0]);
+            case "update" -> updateByCondition(args[0], (EsLambdaQueryWrapper<?>) args[1]);
+            case "updateBatchById" -> updateBatchById(args[0]);
             case "selectById" -> selectById((Serializable) args[0]);
             case "selectBatchIds" -> selectBatchIds(args[0]);
             case "selectCount" -> selectCount((EsLambdaQueryWrapper<?>) args[0]);
@@ -171,6 +174,104 @@ public class EsMapperProxy<T> implements InvocationHandler {
             return "updated".equals(resp.result().jsonValue()) ? 1 : 0;
         } catch (IOException e) {
             throw new EsOpsException("updateById 失败: " + metadata.getIndexName() + "#" + id, e);
+        }
+    }
+
+    /** 条件删除：delete_by_query，conflicts=proceed + refresh，返回实际删除数 */
+    private int deleteByCondition(EsLambdaQueryWrapper<?> wrapper) {
+        requireCondition(wrapper, "delete");
+        Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
+        try {
+            DeleteByQueryResponse resp = client.deleteByQuery(d -> d
+                    .index(metadata.getIndexName())
+                    .query(query)
+                    .conflicts(co.elastic.clients.elasticsearch._types.Conflicts.Proceed)
+                    .refresh(true));
+            return resp.deleted().intValue();
+        } catch (IOException e) {
+            throw new EsOpsException("delete(条件) 失败: " + metadata.getIndexName(), e);
+        }
+    }
+
+    /** 条件部分更新：update_by_query + painless script（ctx._source 赋值 + params 传值） */
+    private int updateByCondition(Object patch, EsLambdaQueryWrapper<?> wrapper) {
+        if (patch == null) {
+            throw new EsOpsException("update 的 patch 实体不能为 null");
+        }
+        requireCondition(wrapper, "update");
+        Map<String, Object> doc = toDocument(patch);
+        if (doc.isEmpty()) {
+            throw new EsOpsException("update 的 patch 至少需要一个非 null 字段（实体 "
+                    + metadata.getEntityClass().getSimpleName() + "）");
+        }
+        // painless：ctx._source['esField'] = params.pN（括号写法安全处理字段名）
+        StringBuilder source = new StringBuilder();
+        Map<String, co.elastic.clients.json.JsonData> params = new LinkedHashMap<>();
+        int i = 0;
+        for (Map.Entry<String, Object> e : doc.entrySet()) {
+            String key = "p" + i++;
+            if (i > 1) {
+                source.append("; ");
+            }
+            source.append("ctx._source['").append(e.getKey()).append("'] = params.").append(key);
+            params.put(key, co.elastic.clients.json.JsonData.of(e.getValue()));
+        }
+        Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
+        try {
+            var resp = client.updateByQuery(u -> u
+                    .index(metadata.getIndexName())
+                    .query(query)
+                    .script(s -> s.lang("painless").source(source.toString()).params(params))
+                    .conflicts(co.elastic.clients.elasticsearch._types.Conflicts.Proceed)
+                    .refresh(true));
+            return resp.updated().intValue();
+        } catch (IOException e) {
+            throw new EsOpsException("update(条件) 失败: " + metadata.getIndexName(), e);
+        }
+    }
+
+    /** 批量按主键部分更新：bulk update，每条取非 null 字段；部分失败整体抛异常（对齐 insertBatch） */
+    private int updateBatchById(Object arg) {
+        Collection<?> entities = (Collection<?>) arg;
+        if (entities == null || entities.isEmpty()) {
+            return 0;
+        }
+        try {
+            BulkRequest.Builder br = new BulkRequest.Builder();
+            for (Object entity : entities) {
+                Object id = metadata.idOf(entity);
+                if (id == null) {
+                    throw new EsOpsException("updateBatchById 的实体缺少主键（实体 "
+                            + metadata.getEntityClass().getSimpleName() + "）");
+                }
+                Map<String, Object> doc = toDocument(entity);
+                if (doc.isEmpty()) {
+                    throw new EsOpsException("updateBatchById 至少需要一个非 null 字段: "
+                            + metadata.getEntityClass().getSimpleName() + "#" + id);
+                }
+                br.operations(op -> op.update(uo -> uo
+                        .index(metadata.getIndexName())
+                        .id(String.valueOf(id))
+                        .action(a -> a.doc(doc))));
+            }
+            BulkResponse resp = client.bulk(br.build());
+            if (resp.errors()) {
+                long failed = resp.items().stream().map(BulkResponseItem::error)
+                        .filter(e -> e != null).count();
+                throw new EsOpsException("updateBatchById 部分失败: " + failed + "/" + entities.size()
+                        + "（索引 " + metadata.getIndexName() + "）");
+            }
+            return entities.size();
+        } catch (IOException e) {
+            throw new EsOpsException("updateBatchById 失败: " + metadata.getIndexName(), e);
+        }
+    }
+
+    /** 条件删除/更新强制要求非空 wrapper（拒绝全量误删误改） */
+    private void requireCondition(EsLambdaQueryWrapper<?> wrapper, String op) {
+        if (wrapper == null || wrapper.isEmpty()) {
+            throw new EsOpsException(op + " 条件不能为空（拒绝全量" + ("delete".equals(op) ? "删除" : "更新")
+                    + "）；请至少附加一个条件，或改用 deleteById/deleteBatchIds/updateById");
         }
     }
 

@@ -32,8 +32,17 @@ public interface EsBaseMapper<T> {
     /** 批量删除，返回删除数 */
     int deleteBatchIds(Collection<? extends Serializable> idList);
 
+    /** 条件删除（delete_by_query）：wrapper 不能为 null 或空（拒绝全量删除），返回实际删除数 */
+    int delete(EsLambdaQueryWrapper<T> wrapper);
+
     /** 按主键更新非 null 字段（部分更新），命中返回 1 否则 0 */
     int updateById(T entity);
+
+    /** 批量按主键部分更新（bulk update，每条取非 null 字段）；部分失败抛 EsOpsException */
+    int updateBatchById(Collection<T> entities);
+
+    /** 条件部分更新（update_by_query + painless script）：patch 取非 null 字段，wrapper 不能为 null 或空（拒绝全量更新），返回实际更新数 */
+    int update(T patch, EsLambdaQueryWrapper<T> wrapper);
 
     /** 按主键查询 */
     T selectById(Serializable id);

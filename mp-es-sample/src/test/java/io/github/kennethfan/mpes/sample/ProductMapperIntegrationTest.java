@@ -30,6 +30,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -356,6 +357,77 @@ class ProductMapperIntegrationTest {
                 new EsLambdaQueryWrapper<Product>().eq(Product::getOnSale, true)
                         .orderByDesc(Product::getPrice));
         assertEquals(ID_1, sorted.getRecords().get(0).getId());  // 399.00 在售最高
+    }
+
+    // ---------- 条件删除 / 条件更新 / 批量部分更新 ----------
+
+    @Test
+    void deleteByCondition() {
+        seedThree();
+
+        // 空条件拒绝（防全量误删）
+        assertThrows(EsOpsException.class, () -> mapper.delete(null));
+        assertThrows(EsOpsException.class, () -> mapper.delete(new EsLambdaQueryWrapper<>()));
+
+        // 条件删除：onSale=false → 仅深圳
+        assertEquals(1, mapper.delete(new EsLambdaQueryWrapper<Product>()
+                .eq(Product::getOnSale, false)));
+        refresh();
+        assertEquals(2, mapper.selectCount(null));
+        assertNull(mapper.selectById(ID_3));
+        assertNotNull(mapper.selectById(ID_1));
+    }
+
+    @Test
+    void updateByCondition() {
+        seedThree();
+
+        Product patch = new Product();
+        // null patch / 空条件 / 空 patch 均拒绝
+        assertThrows(EsOpsException.class, () -> mapper.update(null,
+                new EsLambdaQueryWrapper<Product>().eq(Product::getId, ID_1)));
+        assertThrows(EsOpsException.class, () -> mapper.update(patch, null));
+        assertThrows(EsOpsException.class, () -> mapper.update(patch, new EsLambdaQueryWrapper<>()));
+
+        // 条件更新：在售商品（北京+上海）价格全部改为 500
+        patch.setPrice(new BigDecimal("500"));
+        assertEquals(2, mapper.update(patch, new EsLambdaQueryWrapper<Product>()
+                .eq(Product::getOnSale, true)));
+        Product p = mapper.selectById(ID_1);
+        assertEquals(0, p.getPrice().compareTo(new BigDecimal("500")));
+        // 未提及字段保持原值
+        assertEquals("机械键盘 K870", p.getProductName());
+
+        // 条件更新与 nested 条件组合：含 SKU-C3（深圳）库存改为 1
+        Product patch2 = new Product();
+        patch2.setStock(1);
+        assertEquals(1, mapper.update(patch2, new EsLambdaQueryWrapper<Product>()
+                .nested(Product::getSkus, Sku.class, w -> w.eq(Sku::getSkuCode, "SKU-C3"))));
+        assertEquals(1, mapper.selectById(ID_3).getStock());
+    }
+
+    @Test
+    void batchPartialUpdate() {
+        seedThree();
+
+        // 空集合返回 0；缺主键拒绝
+        assertEquals(0, mapper.updateBatchById(List.of()));
+        assertThrows(EsOpsException.class, () -> mapper.updateBatchById(List.of(new Product())));
+
+        // 批量部分更新：不同实体改不同字段
+        Product u1 = new Product();
+        u1.setId(ID_1);
+        u1.setPrice(new BigDecimal("459.00"));
+        Product u2 = new Product();
+        u2.setId(ID_2);
+        u2.setStock(999);
+        assertEquals(2, mapper.updateBatchById(List.of(u1, u2)));
+        refresh();
+
+        assertEquals(0, mapper.selectById(ID_1).getPrice().compareTo(new BigDecimal("459.00")));
+        assertEquals(100, mapper.selectById(ID_1).getStock());       // 未提及字段不变
+        assertEquals(999, mapper.selectById(ID_2).getStock());
+        assertEquals(0, mapper.selectById(ID_2).getPrice().compareTo(new BigDecimal("129.50")));
     }
 
     // ---------- Geo ----------

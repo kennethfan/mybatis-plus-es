@@ -2,7 +2,7 @@
 
 以 **MyBatis-Plus 风格 API 操作 Elasticsearch** 的适配层：沿用 MP 的 Mapper / Wrapper 写法，底层直连 Elasticsearch 官方 Java API Client，**不经过任何 MyBatis 执行机制**（ADR-0002）。
 
-- 构建状态：`mvn clean verify` 全绿（单元测试 6/6 + 集成测试 10/10 @ 真实 ES 8.19.0）
+- 构建状态：`mvn clean verify` 全绿（单元测试 6/6 + 集成测试 13/13 @ 真实 ES 8.19.0）
 - 版本基线：Spring Boot 3.5.16 / elasticsearch-java 8.19.23 / mybatis-plus-annotation 3.5.17 / JDK 17
 
 ## 架构决策（docs/adr/）
@@ -114,6 +114,15 @@ mapper.updateById(patch);            // 非 null 字段部分更新
 mapper.deleteById(id);
 mapper.selectById(id);
 
+// 条件删除 / 条件更新（空条件一律拒绝，防全量误删误改）
+mapper.delete(new EsLambdaQueryWrapper<Product>().eq(Product::getOnSale, false));
+
+Product patch = new Product();
+patch.setPrice(new BigDecimal("500"));
+mapper.update(patch, new EsLambdaQueryWrapper<Product>()     // update_by_query，在售全部改价
+        .eq(Product::getOnSale, true));
+mapper.updateBatchById(List.of(u1, u2));                     // bulk 按主键部分更新，每条取非 null 字段
+
 // 条件查询（like=keyword 通配；match=显式分词；AND 优先于 OR）
 List<Product> list = mapper.selectList(new EsLambdaQueryWrapper<Product>()
         .eq(Product::getOnSale, true)
@@ -180,6 +189,8 @@ List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
 - 类型推导：String→keyword / Long→long / BigDecimal→double / LocalDate 等→date / 枚举→keyword；不支持的字段类型用 `@TableField(exist = false)` 排除
 - **BigDecimal 数值精度**：经 ES double 往返后 scale 可能变化（399.00 → 399.0），比较请用 `compareTo` 而非 `equals`
 - **写入可见性**：insert/update 后默认 1s refresh 才可被 search 检索到（selectById 为 realtime get 不受影响）；测试中请手动 `client.indices().refresh(...)`
+- **条件删除/更新**：`delete(wrapper)` 走 delete_by_query、`update(patch, wrapper)` 走 update_by_query + painless script（patch 非 null 字段 → params），均 `conflicts=proceed + refresh` 并返回实际影响条数；**wrapper 为 null 或空条件直接抛异常**（拒绝全量误删误改）；条件更新与 nested/geo 条件可自由组合
+- **updateBatchById**：bulk API 逐条部分更新（每条取非 null 字段），部分失败抛 EsOpsException（对齐 insertBatch）；实体缺主键 / 全 null 字段直接报错
 - **terms 聚合桶键**：boolean 字段的桶键为 ES 原生数值语义（true→1 / false→0）；terms 桶数默认上限 100
 - **聚合命名**：未 `as()` 显式命名时，聚合名默认为属性名（非 ES 字段名）；terms 取 `buckets(name)`，单值取 `value(name)`，stats 取 `stats(name)`
 - 高亮走独立方法 `selectHighlighted`（返回 `EsHit<T>`），不改动 `selectList/selectPage` 一期签名
@@ -196,4 +207,4 @@ mvn clean verify            # 单元测试无需 ES；集成测试在 ES 未启�
 
 测试构成：
 - **mp-es-core 单元测试**（6 个）：Lambda 属性名解析、类型推导——不依赖 ES
-- **mp-es-sample 集成测试**（10 个）：CRUD 生命周期、批量读写、条件查询（eq/gt/like/match/between/or 嵌套/selectOne）、分页与越界、高亮、聚合、子聚合、search_after 深分页、Geo（geo_distance 过滤/距离排序/组合条件）、Nested（子文档条件/多条件 AND/往返还原/geo+nested 组合）——需本地 ES 运行，测试内通过 `indices().refresh` 保证写入可见性
+- **mp-es-sample 集成测试**（13 个）：CRUD 生命周期、批量读写、条件查询（eq/gt/like/match/between/or 嵌套/selectOne）、分页与越界、高亮、聚合、子聚合、search_after 深分页、Geo（geo_distance 过滤/距离排序/组合条件）、Nested（子文档条件/多条件 AND/往返还原/geo+nested 组合）、条件删除/条件更新/批量部分更新——需本地 ES 运行，测试内通过 `indices().refresh` 保证写入可见性
