@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geo · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html" class="active">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>Geo</h1>
+<p class="lead">geo_point 全链路：值对象、距离过滤、距离排序，与其它条件自由组合。</p>
+
+<h2>实体声明</h2>
+<pre><code>@EsGeoPoint                          // 显式标注（类型必须是 GeoPoint）
+private GeoPoint location;
+
+p.setLocation(new GeoPoint(39.90, 116.40));   // lat, lon（构造期校验范围）</code></pre>
+<h2>距离过滤</h2>
+<pre><code>// 距北京 1500km 内（支持 "1500km" / "20mi" 等 ES 距离单位）
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .geoDistance(Product::getLocation, "1500km", new GeoPoint(39.90, 116.40)));</code></pre>
+<h2>距离排序</h2>
+<pre><code>// 按到 origin 的距离升序
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .orderByGeoDistance(Product::getLocation, new GeoPoint(39.90, 116.40), true));</code></pre>
+<h2>组合</h2>
+<pre><code>// geo + 普通条件 + nested 条件
+mapper.selectList(new EsLambdaQueryWrapper&lt;Product&gt;()
+        .geoDistance(Product::getLocation, "1500km", new GeoPoint(39.90, 116.40))
+        .eq(Product::getOnSale, true)
+        .nested(Product::getSkus, Sku.class, w -&gt; w.eq(Sku::getSkuCode, "SKU-B2")));</code></pre>
+<div class="warn"><b>⚠️</b> geoDistance / orderByGeoDistance 仅用于 geo_point 字段，否则直接报错；
+GeoPoint 序列化为 <code>{"lat":..,"lon":..}</code> 原生格式，经 _source 往返无损。</div>
+<nav class="pager"><a href="aggregation.html">← 聚合</a>
+<a href="nested.html">Nested →</a></nav></main>
+</div>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>配置参考 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html" class="active">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>配置参考</h1>
+<p class="lead">前缀 <code>mp-es</code>，由 EsProperties 绑定，库即 starter（依赖即生效）。</p>
+
+<h2>全量配置</h2>
+<table>
+  <tr><th>配置项</th><th>默认</th><th>说明</th></tr>
+  <tr><td>mp-es.uris</td><td>—（必填）</td><td>ES 地址列表，如 <code>[http://localhost:9200]</code>，支持多节点</td></tr>
+  <tr><td>mp-es.username</td><td>—</td><td>Basic 认证用户名（username / password 需同时提供）</td></tr>
+  <tr><td>mp-es.password</td><td>—</td><td>Basic 认证密码</td></tr>
+  <tr><td>mp-es.index.auto-create</td><td>true</td><td>启动时 create-if-absent</td></tr>
+  <tr><td>mp-es.index.mismatch-policy</td><td>WARN</td><td>mapping 不一致策略：WARN / FAIL</td></tr>
+</table>
+
+<h2>示例</h2>
+<pre><code>mp-es:
+  uris: [http://localhost:9200, http://localhost:9201]
+  # username: elastic
+  # password: changeme
+  index:
+    auto-create: true
+    mismatch-policy: FAIL</code></pre>
+<h2>Bean 装配</h2>
+<table>
+  <tr><th>Bean</th><th>说明</th></tr>
+  <tr><td>mpEsRestClient</td><td>RestClient（@ConditionalOnMissingBean，可自定义替换）</td></tr>
+  <tr><td>mpEsObjectMapper</td><td>客户端专用 ObjectMapper：JavaTimeModule + 关闭 WRITE_DATES_AS_TIMESTAMPS + FAIL_ON_UNKNOWN_PROPERTIES=false，<b>不污染应用自身的 Jackson 配置</b></td></tr>
+  <tr><td>elasticsearchClient</td><td>ElasticsearchClient（RestClientTransport + JacksonJsonpMapper）</td></tr>
+  <tr><td>esIndexManager / esIndexBootstrap</td><td>Index 托管与启动引导</td></tr>
+</table>
+
+<div class="tip"><b>💡</b> Mapper 注册：<code>@EsMapperScan("com.example.mapper")</code>，基于 ImportBeanDefinitionRegistrar + EsMapperFactoryBean，体验对齐 @MapperScan。</div>
+<nav class="pager"><a href="nested.html">← Nested</a>
+<a href="faq.html">语义边界与 FAQ →</a></nav></main>
+</div>
+</body>
+</html>

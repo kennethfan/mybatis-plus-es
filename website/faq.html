@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>语义边界与 FAQ · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html" class="active">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>语义边界与 FAQ</h1>
+<p class="lead">使用前必读的坑点对照表——全部来自真实集成测试验证。</p>
+
+<h2>精度与类型</h2>
+<table>
+  <tr><th>坑点</th><th>说明</th><th>正确姿势</th></tr>
+  <tr><td>BigDecimal 精度</td><td>经 ES double 往返后 scale 可能变化（399.00 → 399.0）</td><td>比较用 <code>compareTo</code>，不要 <code>equals</code></td></tr>
+  <tr><td>boolean 聚合桶键</td><td>terms 聚合 boolean 字段桶键为数值 1/0（ES 原生语义）</td><td><code>Long.valueOf(1L).equals(bucket.getKey())</code></td></tr>
+</table>
+
+<h2>字段类型适配</h2>
+<table>
+  <tr><th>坑点</th><th>说明</th><th>正确姿势</th></tr>
+  <tr><td>match 打在 keyword 上</td><td>keyword 无分词，match 查询词整词化后与字段值比较，"键盘" ≠ "机械键盘 K870"</td><td>keyword 精确用 eq、包含用 like、前缀用 prefix；match 只用于 text</td></tr>
+  <tr><td>text 字段用 eq/like/fuzzy/prefix</td><td>分词后语义错误</td><td>引擎直接报错并提示用 match</td></tr>
+  <tr><td>fuzzy 整词比较</td><td>keyword 是整词容错，"K860" ≠ "机械键盘 K870"（距离过远）</td><td>候选词需与整词接近（编辑距离内）</td></tr>
+</table>
+
+<h2>可见性与一致性</h2>
+<table>
+  <tr><th>坑点</th><th>说明</th><th>正确姿势</th></tr>
+  <tr><td>写入不可见</td><td>insert/update 后默认 1s refresh 才能被 search 检索（selectById 是 realtime get 不受影响）</td><td>测试中手动 <code>client.indices().refresh(...)</code></td></tr>
+  <tr><td>delete 409</td><td>删除目标刚被并发更新会版本冲突</td><td>deleteBatchIds/delete 已设 <code>conflicts=proceed</code> 自动跳过</td></tr>
+  <tr><td>selectOne 多条</td><td>命中多条直接抛异常（不静默取首条）</td><td>收紧条件或改用 selectList</td></tr>
+</table>
+
+<h2>容量与限制</h2>
+<table>
+  <tr><th>限制</th><th>值</th><th>说明</th></tr>
+  <tr><td>from+size 窗口</td><td>10000</td><td>超出用 selectAfter（search_after）</td></tr>
+  <tr><td>selectList 上限</td><td>1000 条</td><td>全量导出用 selectAfter 游标</td></tr>
+  <tr><td>terms 桶数</td><td>100</td><td>子聚合同规则</td></tr>
+  <tr><td>search_after 每批</td><td>10000</td><td>EsAfter.first(size) 的 size 上限</td></tr>
+</table>
+
+<h2>依赖陷阱</h2>
+<div class="warn"><b>⚠️</b> <code>mybatis-plus-annotation</code> 把 <code>org.mybatis:mybatis</code> 声明为 optional，
+但其注解默认值引用 <code>JdbcType</code>，运行时解析注解必须能加载该类。mp-es-core 已显式引入 mybatis——
+<b>仅作为注解解析载荷，无任何 MyBatis 执行路径</b>（ADR-0002/0004 已记录此例外）。</div>
+<nav class="pager"><a href="configuration.html">← 配置参考</a>
+<a href="roadmap.html">Roadmap →</a></nav></main>
+</div>
+</body>
+</html>

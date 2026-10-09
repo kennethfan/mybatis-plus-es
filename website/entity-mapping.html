@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>实体映射 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html" class="active">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>实体映射</h1>
+<p class="lead">MP 注解即 ES 映射（ADR-0004）：不新增一套映射体系，注解在编译期就在、运行期直接解析。</p>
+
+<h2>注解总览</h2>
+<table>
+  <tr><th>注解</th><th>来源</th><th>映射语义</th></tr>
+  <tr><td>@TableName("mpes_product")</td><td>MP</td><td>索引名（缺省为类名首字母小写）</td></tr>
+  <tr><td>@TableId</td><td>MP</td><td>文档 _id（同时保留在 _source）</td></tr>
+  <tr><td>@TableField("product_name")</td><td>MP</td><td>ES 字段名（缺省为属性名原样 camelCase）；<code>exist=false</code> 排除字段</td></tr>
+  <tr><td>@EsText(analyzer = "standard")</td><td>mp-es</td><td>String 覆盖为 text 分词字段</td></tr>
+  <tr><td>@EsGeoPoint</td><td>mp-es</td><td>geo_point 标注（类型必须是 GeoPoint，否则启动报错）</td></tr>
+  <tr><td>@EsNested</td><td>mp-es</td><td>nested 子文档（<code>List&lt;子实体&gt;</code> 或单个子实体）</td></tr>
+</table>
+
+<h2>类型推导</h2>
+<table>
+  <tr><th>Java 类型</th><th>ES 类型</th></tr>
+  <tr><td>String</td><td>keyword（标注 @EsText 覆盖为 text）</td></tr>
+  <tr><td>Long / long</td><td>long</td></tr>
+  <tr><td>Integer / int</td><td>integer</td></tr>
+  <tr><td>Short / Byte</td><td>short / byte</td></tr>
+  <tr><td>Double / Float</td><td>double / float</td></tr>
+  <tr><td>BigDecimal</td><td>double</td></tr>
+  <tr><td>Boolean</td><td>boolean</td></tr>
+  <tr><td>LocalDate / LocalDateTime 等</td><td>date</td></tr>
+  <tr><td>枚举</td><td>keyword</td></tr>
+  <tr><td>GeoPoint（@EsGeoPoint）</td><td>geo_point</td></tr>
+  <tr><td>子实体（@EsNested）</td><td>nested（递归解析子实体字段）</td></tr>
+</table>
+
+<h2>Nested 子实体</h2>
+<pre><code>@Data
+public class Sku {
+    @TableId
+    private String skuCode;      // 子实体无需 @TableName（不独立成索引），但需主键字段
+    private String spec;
+    private Integer quantity;
+}
+
+@EsNested
+private List&lt;Sku&gt; skus;          // List&lt;子实体&gt; 或单个子实体均可</code></pre>
+<ul>
+  <li>子实体字段类型推导规则与顶层一致，支持递归（nested 套 nested）</li>
+  <li>循环引用直接报错（解析期 visited 检测）</li>
+  <li>写入/读取时子文档字段名与 ES 字段名<b>双向重命名可逆</b>（@TableField 在子实体上同样生效）</li>
+</ul>
+
+<h2>GeoPoint 值对象</h2>
+<pre><code>// 构造时校验：lat ∈ [-90, 90]，lon ∈ [-180, 180]
+p.setLocation(new GeoPoint(39.90, 116.40));
+// Jackson 序列化为 ES 原生格式 {"lat":39.9,"lon":116.4}</code></pre>
+
+<div class="warn"><b>⚠️</b> 不支持的字段类型用 <code>@TableField(exist = false)</code> 排除，否则启动报「不支持的字段类型」。</div>
+<nav class="pager"><a href="quick-start.html">← 快速开始</a>
+<a href="index-management.html">Index 托管 →</a></nav></main>
+</div>
+</body>
+</html>

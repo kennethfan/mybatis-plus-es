@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>高亮 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html" class="active">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>高亮</h1>
+<p class="lead">selectHighlighted 独立方法：返回实体 + 高亮片段，不影响常规查询签名。</p>
+
+<h2>用法</h2>
+<pre><code>List&lt;EsHit&lt;Product&gt;&gt; hits = mapper.selectHighlighted(
+        new EsLambdaQueryWrapper&lt;Product&gt;().match(Product::getDescription, "无线"),
+        EsHighlight.of(Product::getProductName, Product::getDescription)
+                .preTag("&lt;b&gt;").postTag("&lt;/b&gt;"));
+
+for (EsHit&lt;Product&gt; hit : hits) {
+    Product entity = hit.getEntity();            // 完整实体
+    Map&lt;String, List&lt;String&gt;&gt; all = hit.getHighlights();      // 全部片段
+    List&lt;String&gt; fragments = hit.highlightsOf("description"); // 按属性名取
+}</code></pre>
+<h2>语义</h2>
+<ul>
+  <li>默认标签 <code>&lt;em&gt;&lt;/em&gt;</code>，可 <code>preTag / postTag</code> 自定义</li>
+  <li><code>highlightsOf</code> 按属性名取片段（引擎已把 ES 字段名转回属性名）</li>
+  <li>高亮字段需与查询条件配合：仅对 match 命中的 text 字段产生片段</li>
+</ul>
+<div class="tip"><b>💡</b> 高亮走独立方法是有意设计：不污染 selectList / selectPage 的一期签名。</div>
+<nav class="pager"><a href="pagination.html">← 分页与深分页</a>
+<a href="aggregation.html">聚合 →</a></nav></main>
+</div>
+</body>
+</html>

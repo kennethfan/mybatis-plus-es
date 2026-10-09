@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分页与深分页 · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html" class="active">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>分页与深分页</h1>
+<p class="lead">两种分页：Page（from+size，轻量跳页）与 EsAfter（search_after 游标，深翻页）。</p>
+
+<h2>Page：from+size</h2>
+<pre><code>Page&lt;Product&gt; page = mapper.selectPage(new Page&lt;&gt;(1, 10),
+        new EsLambdaQueryWrapper&lt;Product&gt;().orderByAsc(Product::getPrice));
+page.getTotal();        // 命中总数
+page.getRecords();      // 当前页数据</code></pre>
+<ul>
+  <li>窗口上限 <code>current × size ≤ 10000</code>（与 ES max_result_window 一致），越界抛异常</li>
+  <li>适合管理后台式的<b>浅跳页</b></li>
+</ul>
+
+<h2>EsAfter：search_after 游标</h2>
+<pre><code>// 首页：EsAfter.first(size)
+EsAfterResult&lt;Product&gt; page1 = mapper.selectAfter(EsAfter.first(100),
+        new EsLambdaQueryWrapper&lt;Product&gt;().eq(Product::getOnSale, true));
+page1.getRecords();     // 本批数据
+page1.getTotal();       // 命中总数
+page1.getNext();        // 下一页游标；null 表示已取完
+
+// 翻页：把 next 传入即可
+EsAfterResult&lt;Product&gt; page2 = mapper.selectAfter(page1.getNext(), wrapper);</code></pre>
+<ul>
+  <li><b>无 10000 窗口限制</b>，每批上限 10000</li>
+  <li>自动追加主键字段兜底排序保证全序（_id 禁止 fielddata 排序，故用 _source 主键）</li>
+  <li>取 size+1 判定 <code>hasMore</code>：最后一批 next 为 null，<b>不重不漏</b></li>
+</ul>
+
+<h2>如何选择</h2>
+<table>
+  <tr><th>场景</th><th>选择</th></tr>
+  <tr><td>后台列表、跳页导航</td><td>Page</td></tr>
+  <tr><td>导出全量、深翻页、游标流式处理</td><td>EsAfter</td></tr>
+  <tr><td>越界报「超出 from+size 上限」</td><td>改用 EsAfter</td></tr>
+</table>
+<nav class="pager"><a href="search-enhanced.html">← 查询增强</a>
+<a href="highlight.html">高亮 →</a></nav></main>
+</div>
+</body>
+</html>

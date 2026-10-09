@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roadmap · mybatis-plus-es 文档</title>
+<link rel="stylesheet" href="assets/guide.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html">mybatis-plus<span class="es">-es</span></a>
+  <span class="tagline">MyBatis-Plus 风格 API 操作 Elasticsearch</span>
+  <div class="top-links">
+    <a href="https://github.com/kennethfan/mybatis-plus-es" target="_blank">GitHub</a>
+    <a href="https://github.com/kennethfan/mybatis-plus-es/issues" target="_blank">Issues</a>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidebar"><div class="nav-group">
+<div class="nav-label">开始</div>
+<a href="index.html">概览</a>
+<a href="quick-start.html">快速开始</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">核心</div>
+<a href="entity-mapping.html">实体映射</a>
+<a href="index-management.html">Index 托管</a>
+<a href="crud.html">CRUD 与条件写</a>
+<a href="wrapper.html">条件查询 Wrapper</a>
+<a href="search-enhanced.html">查询增强</a>
+<a href="pagination.html">分页与深分页</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">进阶</div>
+<a href="highlight.html">高亮</a>
+<a href="aggregation.html">聚合</a>
+<a href="geo.html">Geo</a>
+<a href="nested.html">Nested</a>
+</div>
+<div class="nav-group">
+<div class="nav-label">参考</div>
+<a href="configuration.html">配置参考</a>
+<a href="faq.html">语义边界与 FAQ</a>
+<a href="roadmap.html" class="active">Roadmap</a>
+</div></nav>
+  <main class="content">
+<h1>Roadmap</h1>
+<p class="lead">已完成六个迭代；候选方向按需排期，欢迎提 issue 讨论。</p>
+
+<h2>已完成</h2>
+<table>
+  <tr><th>期</th><th>内容</th></tr>
+  <tr><td>一期</td><td>Mapper 代理 / CRUD / 条件查询 / from+size 分页 / Index 托管</td></tr>
+  <tr><td>二期</td><td>高亮、聚合（terms/avg/max/min/sum/stats/cardinality）</td></tr>
+  <tr><td>三期</td><td>search_after 深分页、子聚合、Geo、Nested</td></tr>
+  <tr><td>四期</td><td>条件删除、条件更新（painless script）、批量部分更新</td></tr>
+  <tr><td>五期</td><td>查询增强：multiMatch、fuzzy、prefix、boost</td></tr>
+  <tr><td>六期</td><td>工程化：GitHub Actions CI、Javadoc 质量门槛、Maven Central 发布准备</td></tr>
+</table>
+
+<h2>候选方向</h2>
+<table>
+  <tr><th>方向</th><th>内容</th></tr>
+  <tr><td>索引运维</td><td>alias 切换、reindex 重建 mapping、索引模板——解决「改实体必须删索引」痛点</td></tr>
+  <tr><td>nested 进阶</td><td>nested 排序（NestedSortValue）、nested 聚合、inner_hits（返回命中子文档）</td></tr>
+  <tr><td>聚合扩展</td><td>date_histogram、range、top_hits、分桶排序（order by sub-agg）</td></tr>
+  <tr><td>查询增强续</td><td>multi_match 的 type/operator 配置、script 查询、collapse 去重</td></tr>
+  <tr><td>发布落地</td><td>Maven Central 实际发布（需 Central Portal 账号 + GPG）</td></tr>
+</table>
+
+<h2>文档站</h2>
+<p>本站点为纯静态 HTML，源码位于仓库 <code>website/</code>，push 到 main 后由 GitHub Actions 自动发布到 GitHub Pages。</p>
+<nav class="pager"><a href="faq.html">← 语义边界与 FAQ</a>
+<span></span></nav></main>
+</div>
+</body>
+</html>
