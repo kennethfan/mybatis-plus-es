@@ -2,6 +2,7 @@ package io.github.kennethfan.mpes.wrapper;
 
 import io.github.kennethfan.mpes.core.SFunction;
 import io.github.kennethfan.mpes.geo.GeoPoint;
+import io.github.kennethfan.mpes.support.EsOpsException;
 import io.github.kennethfan.mpes.support.LambdaUtils;
 import lombok.Getter;
 
@@ -26,10 +27,17 @@ import java.util.function.Consumer;
  */
 public class EsLambdaQueryWrapper<T> {
 
-    enum Op { EQ, NE, IN, GT, GE, LT, LE, BETWEEN, LIKE, MATCH, IS_NULL, GEO_DISTANCE }
+    enum Op { EQ, NE, IN, GT, GE, LT, LE, BETWEEN, LIKE, MATCH, IS_NULL, GEO_DISTANCE, FUZZY, PREFIX }
 
-    /** 叶子条件：操作符 + 属性名 + 值（GEO_DISTANCE 时 values = [distance, GeoPoint]） */
-    record Leaf(Op op, String property, List<Object> values) {}
+    /**
+     * 叶子条件：操作符 + 属性名 + 值。
+     * GEO_DISTANCE 时 values = [distance, GeoPoint]；FUZZY 时 values = [value, fuzziness]；
+     * boost 仅 match 打分场景使用（null 表示不加权）。
+     */
+    record Leaf(Op op, String property, List<Object> values, Float boost) {}
+
+    /** multi_match 条件：跨多字段分词检索（best_fields），boost 可空 */
+    record MultiMatchLeaf(List<String> properties, Object value, Float boost) {}
 
     /** nested 子文档条件：属性名 + 作用于子实体类型的子 Wrapper */
     record NestedLeaf(String property, EsLambdaQueryWrapper<?> inner) {}
@@ -100,6 +108,46 @@ public class EsLambdaQueryWrapper<T> {
     /** 显式分词检索 */
     public EsLambdaQueryWrapper<T> match(SFunction<T, ?> col, Object value) {
         return add(Op.MATCH, col, value);
+    }
+
+    /** 显式分词检索（带权重 boost，用于 or 场景下调整相关性排序） */
+    public EsLambdaQueryWrapper<T> match(SFunction<T, ?> col, Object value, float boost) {
+        return add(Op.MATCH, col, boost, value);
+    }
+
+    /** 跨多字段分词检索（multi_match，默认 best_fields） */
+    public EsLambdaQueryWrapper<T> multiMatch(Object value, SFunction<T, ?>... cols) {
+        return multiMatchInternal(null, value, cols);
+    }
+
+    /** 跨多字段分词检索（带权重 boost） */
+    public EsLambdaQueryWrapper<T> multiMatch(float boost, Object value, SFunction<T, ?>... cols) {
+        return multiMatchInternal(boost, value, cols);
+    }
+
+    private EsLambdaQueryWrapper<T> multiMatchInternal(Float boost, Object value, SFunction<T, ?>... cols) {
+        if (cols == null || cols.length == 0) {
+            throw new EsOpsException("multiMatch 至少需要一个字段");
+        }
+        List<String> props = Arrays.stream(cols).map(LambdaUtils::propertyName).toList();
+        nodes.add(new Node(pendingOr, new MultiMatchLeaf(props, value, boost)));
+        pendingOr = false;
+        return this;
+    }
+
+    /** 容错检索（仅 keyword 字段）：默认 AUTO 编辑距离（3-5 字符容 1 级、6+ 字符容 2 级） */
+    public EsLambdaQueryWrapper<T> fuzzy(SFunction<T, ?> col, Object value) {
+        return add(Op.FUZZY, col, value, "AUTO");
+    }
+
+    /** 容错检索（仅 keyword 字段）：显式指定最大编辑距离 */
+    public EsLambdaQueryWrapper<T> fuzzy(SFunction<T, ?> col, Object value, int maxEdits) {
+        return add(Op.FUZZY, col, value, String.valueOf(maxEdits));
+    }
+
+    /** 前缀匹配（仅 keyword 字段）：原生 prefix 查询，优于 like("v*") 通配符 */
+    public EsLambdaQueryWrapper<T> prefix(SFunction<T, ?> col, String value) {
+        return add(Op.PREFIX, col, value);
     }
 
     public EsLambdaQueryWrapper<T> isNull(SFunction<T, ?> col) {
@@ -179,7 +227,12 @@ public class EsLambdaQueryWrapper<T> {
     // ---------- 内部 ----------
 
     private EsLambdaQueryWrapper<T> add(Op op, SFunction<T, ?> col, Object... values) {
-        nodes.add(new Node(pendingOr, new Leaf(op, LambdaUtils.propertyName(col), Arrays.asList(values))));
+        return add(op, col, null, values);
+    }
+
+    private EsLambdaQueryWrapper<T> add(Op op, SFunction<T, ?> col, Float boost, Object... values) {
+        nodes.add(new Node(pendingOr,
+                new Leaf(op, LambdaUtils.propertyName(col), Arrays.asList(values), boost)));
         pendingOr = false;
         return this;
     }
