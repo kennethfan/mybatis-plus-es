@@ -27,6 +27,7 @@ public class Page<T> {
     /** 命中总数 */
     private long total;
 
+    /** 当前页数据 */
     private List<T> records = new ArrayList<>();
 
     public Page() {
@@ -48,7 +49,7 @@ public class Page<T> {
         long end = (current - 1) * size + size;
         if (end > MAX_RESULT_WINDOW) {
             throw new EsOpsException("分页超出 from+size 上限 " + MAX_RESULT_WINDOW
-                    + "（current=" + current + ", size=" + size + "），深分页请等待二期 search_after");
+                    + "（current=" + current + ", size=" + size + "），深分页请使用 selectAfter（search_after）");
         }
     }
 }

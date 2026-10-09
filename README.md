@@ -1,5 +1,7 @@
 # mybatis-plus-es
 
+[![CI](https://github.com/kennethfan/mybatis-plus-es/actions/workflows/ci.yml/badge.svg)](https://github.com/kennethfan/mybatis-plus-es/actions/workflows/ci.yml)
+
 以 **MyBatis-Plus 风格 API 操作 Elasticsearch** 的适配层：沿用 MP 的 Mapper / Wrapper 写法，底层直连 Elasticsearch 官方 Java API Client，**不经过任何 MyBatis 执行机制**（ADR-0002）。
 
 - 构建状态：`mvn clean verify` 全绿（单元测试 6/6 + 集成测试 16/16 @ 真实 ES 8.19.0）
@@ -222,3 +224,21 @@ mvn clean verify            # 单元测试无需 ES；集成测试在 ES 未启�
 测试构成：
 - **mp-es-core 单元测试**（6 个）：Lambda 属性名解析、类型推导——不依赖 ES
 - **mp-es-sample 集成测试**（16 个）：CRUD 生命周期、批量读写、条件查询（eq/gt/like/match/between/or 嵌套/selectOne）、分页与越界、高亮、聚合、子聚合、search_after 深分页、Geo（geo_distance 过滤/距离排序/组合条件）、Nested（子文档条件/多条件 AND/往返还原/geo+nested 组合）、条件删除/条件更新/批量部分更新、查询增强（multiMatch/boost 排序翻转/fuzzy 容错/prefix）——需本地 ES 运行，测试内通过 `indices().refresh` 保证写入可见性
+
+## CI
+
+GitHub Actions（[.github/workflows/ci.yml](.github/workflows/ci.yml)）：push 到 main / PR 触发，JDK 17 + `services` 起 ES 8.19.0 容器（healthcheck 等待就绪），执行 `mvn verify` 全量验证——与本地验证语义一致。
+
+## 发布（Maven Central 准备）
+
+发布元数据已就位（licenses / developers / scm / distributionManagement → Central Portal，License Apache-2.0）。实际发布步骤（需要 Central Portal 账号与 GPG 密钥，另行操作）：
+
+```bash
+mvn -Prelease deploy        # -Prelease 激活 sources + javadoc + gpg 签名；仅 mp-es-core 发布（sample 已 skip deploy）
+```
+
+发布校验（无需账号，本地可跑）：
+
+```bash
+mvn -B -ntp javadoc:javadoc -pl mp-es-core   # Javadoc 可生成（质量门槛）
+```

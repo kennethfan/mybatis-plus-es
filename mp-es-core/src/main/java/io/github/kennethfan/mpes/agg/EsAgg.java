@@ -32,18 +32,22 @@ public class EsAgg {
         return new EsAgg(Type.TERMS, LambdaUtils.propertyName(col));
     }
 
+    /** 平均值 */
     public static <T> EsAgg avg(SFunction<T, ?> col) {
         return new EsAgg(Type.AVG, LambdaUtils.propertyName(col));
     }
 
+    /** 最大值 */
     public static <T> EsAgg max(SFunction<T, ?> col) {
         return new EsAgg(Type.MAX, LambdaUtils.propertyName(col));
     }
 
+    /** 最小值 */
     public static <T> EsAgg min(SFunction<T, ?> col) {
         return new EsAgg(Type.MIN, LambdaUtils.propertyName(col));
     }
 
+    /** 求和 */
     public static <T> EsAgg sum(SFunction<T, ?> col) {
         return new EsAgg(Type.SUM, LambdaUtils.propertyName(col));
     }
