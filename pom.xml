@@ -13,7 +13,7 @@
 
     <groupId>io.github.kennethfan</groupId>
     <artifactId>mybatis-plus-es</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <packaging>pom</packaging>
     <name>mybatis-plus-es</name>
     <description>MyBatis-Plus 风格 API 操作 Elasticsearch 的适配层：沿用 MP 的 Mapper / Wrapper 写法，底层直连 Elasticsearch 官方 Java API Client，不经过任何 MyBatis 执行机制</description>
