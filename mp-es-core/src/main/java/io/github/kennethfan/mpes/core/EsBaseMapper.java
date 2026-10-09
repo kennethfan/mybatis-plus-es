@@ -1,5 +1,9 @@
 package io.github.kennethfan.mpes.core;
 
+import io.github.kennethfan.mpes.agg.EsAgg;
+import io.github.kennethfan.mpes.agg.EsAggResult;
+import io.github.kennethfan.mpes.highlight.EsHighlight;
+import io.github.kennethfan.mpes.highlight.EsHit;
 import io.github.kennethfan.mpes.page.Page;
 import io.github.kennethfan.mpes.wrapper.EsLambdaQueryWrapper;
 
@@ -46,4 +50,10 @@ public interface EsBaseMapper<T> {
 
     /** 分页查询（from+size，窗口上限 10000） */
     Page<T> selectPage(Page<T> page, EsLambdaQueryWrapper<T> wrapper);
+
+    /** 高亮检索：返回实体 + 高亮片段（highlight 中字段需与查询条件配合使用） */
+    List<EsHit<T>> selectHighlighted(EsLambdaQueryWrapper<T> wrapper, EsHighlight<T> highlight);
+
+    /** 聚合查询：terms / avg / max / min / sum / stats / cardinality（ES 查询不返回文档，size=0） */
+    EsAggResult aggregate(EsLambdaQueryWrapper<T> wrapper, EsAgg... aggs);
 }

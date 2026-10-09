@@ -110,6 +110,22 @@ Page<Product> page = mapper.selectPage(new Page<>(1, 10), wrapper);
 
 // wrapper 传 null = 全量（match_all）
 Long total = mapper.selectCount(null);
+
+// 高亮（默认 <em></em> 标签，可自定义）
+List<EsHit<Product>> hits = mapper.selectHighlighted(wrapper,
+        EsHighlight.of(Product::getProductName, Product::getDescription).preTag("<b>").postTag("</b>"));
+// EsHit<T>: getEntity() + getHighlights()（属性名 → 片段列表）
+
+// 聚合（terms / avg / max / min / sum / stats / cardinality；查询不返回文档）
+EsAggResult result = mapper.aggregate(wrapper,
+        EsAgg.terms(Product::getOnSale),
+        EsAgg.avg(Product::getPrice).as("avgPrice"),
+        EsAgg.max(Product::getPrice),
+        EsAgg.stats(Product::getStock),
+        EsAgg.cardinality(Product::getProductName));
+result.buckets("onSale");      // terms 桶（key + count）
+result.value("avgPrice");      // 单值（Double）
+result.stats("stock");         // count/min/max/avg/sum
 ```
 
 ## 语义与边界（一期）
@@ -125,6 +141,9 @@ Long total = mapper.selectCount(null);
 - 类型推导：String→keyword / Long→long / BigDecimal→double / LocalDate 等→date / 枚举→keyword；不支持的字段类型用 `@TableField(exist = false)` 排除
 - **BigDecimal 数值精度**：经 ES double 往返后 scale 可能变化（399.00 → 399.0），比较请用 `compareTo` 而非 `equals`
 - **写入可见性**：insert/update 后默认 1s refresh 才可被 search 检索到（selectById 为 realtime get 不受影响）；测试中请手动 `client.indices().refresh(...)`
+- **terms 聚合桶键**：boolean 字段的桶键为 ES 原生数值语义（true→1 / false→0）；terms 桶数默认上限 100
+- **聚合命名**：未 `as()` 显式命名时，聚合名默认为属性名（非 ES 字段名）；terms 取 `buckets(name)`，单值取 `value(name)`，stats 取 `stats(name)`
+- 高亮走独立方法 `selectHighlighted`（返回 `EsHit<T>`），不改动 `selectList/selectPage` 一期签名
 
 ## 构建
 
@@ -134,4 +153,4 @@ mvn clean verify            # 单元测试无需 ES；集成测试在 ES 未启�
 
 测试构成：
 - **mp-es-core 单元测试**（6 个）：Lambda 属性名解析、类型推导——不依赖 ES
-- **mp-es-sample 集成测试**（4 个）：CRUD 生命周期、批量读写、条件查询（eq/gt/like/match/between/or 嵌套/selectOne）、分页与越界——需本地 ES 运行，测试内通过 `indices().refresh` 保证写入可见性
+- **mp-es-sample 集成测试**（6 个）：CRUD 生命周期、批量读写、条件查询（eq/gt/like/match/between/or 嵌套/selectOne）、分页与越界、高亮、聚合——需本地 ES 运行，测试内通过 `indices().refresh` 保证写入可见性

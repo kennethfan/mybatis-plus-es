@@ -2,15 +2,22 @@ package io.github.kennethfan.mpes.core;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.FieldValue;
+import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
+import co.elastic.clients.elasticsearch.core.search.Highlight;
+import co.elastic.clients.elasticsearch.core.search.HighlightField;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch._types.Result;
 import co.elastic.clients.json.JsonData;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.kennethfan.mpes.agg.EsAgg;
+import io.github.kennethfan.mpes.agg.EsAggResult;
+import io.github.kennethfan.mpes.highlight.EsHighlight;
+import io.github.kennethfan.mpes.highlight.EsHit;
 import io.github.kennethfan.mpes.metadata.EntityMetadata;
 import io.github.kennethfan.mpes.metadata.FieldMetadata;
 import io.github.kennethfan.mpes.page.Page;
@@ -67,6 +74,9 @@ public class EsMapperProxy<T> implements InvocationHandler {
             case "selectList" -> selectList((EsLambdaQueryWrapper<?>) args[0]);
             case "selectOne" -> selectOne((EsLambdaQueryWrapper<?>) args[0]);
             case "selectPage" -> selectPage((Page<?>) args[0], (EsLambdaQueryWrapper<?>) args[1]);
+            case "selectHighlighted" -> selectHighlighted(
+                    (EsLambdaQueryWrapper<?>) args[0], (EsHighlight<?>) args[1]);
+            case "aggregate" -> aggregate((EsLambdaQueryWrapper<?>) args[0], (EsAgg[]) args[1]);
             case "toString" -> mapperInterface.getSimpleName() + "@" + metadata.getIndexName();
             case "hashCode" -> System.identityHashCode(proxy);
             case "equals" -> proxy == args[0];
@@ -301,6 +311,88 @@ public class EsMapperProxy<T> implements InvocationHandler {
         } catch (IOException e) {
             throw new EsOpsException("count 失败: " + metadata.getIndexName(), e);
         }
+    }
+
+    // ---------- 高亮 ----------
+
+    @SuppressWarnings("unchecked")
+    private <E> List<EsHit<E>> selectHighlighted(EsLambdaQueryWrapper<?> wrapper, EsHighlight<?> highlight) {
+        Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
+        Map<String, HighlightField> fieldSpecs = new LinkedHashMap<>();
+        for (String property : highlight.getProperties()) {
+            fieldSpecs.put(fieldResolver.apply(property).getEsFieldName(), HighlightField.of(b -> b));
+        }
+        Highlight hl = Highlight.of(h -> h
+                .preTags(highlight.getPreTag())
+                .postTags(highlight.getPostTag())
+                .fields(fieldSpecs));
+        try {
+            var resp = client.search(s -> s
+                            .index(metadata.getIndexName())
+                            .query(query)
+                            .highlight(hl)
+                            .size(MAX_LIST_SIZE)
+                            .trackTotalHits(t -> t.enabled(true)),
+                    Map.class);
+            List<?> src = resp.hits().hits().stream().map(this::toHit).toList();
+            return (List<EsHit<E>>) src;
+        } catch (IOException e) {
+            throw new EsOpsException("selectHighlighted 失败: " + metadata.getIndexName(), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private <E> EsHit<E> toHit(Hit<?> hit) {
+        // 8.19 客户端：hit.highlight() 已是 Map<ES字段名, List<片段>>
+        Map<String, List<String>> highlights = new LinkedHashMap<>();
+        hit.highlight().forEach((esFieldName, fragments) ->
+                highlights.put(esFieldNameToProperty(esFieldName), fragments));
+        return new EsHit<>((E) toEntity(hit.source()), highlights);
+    }
+
+    private String esFieldNameToProperty(String esFieldName) {
+        return metadata.getFields().stream()
+                .filter(f -> f.getEsFieldName().equals(esFieldName))
+                .findFirst()
+                .map(FieldMetadata::getProperty)
+                .orElse(esFieldName);
+    }
+
+    // ---------- 聚合 ----------
+
+    private EsAggResult aggregate(EsLambdaQueryWrapper<?> wrapper, EsAgg... aggs) {
+        if (aggs == null || aggs.length == 0) {
+            throw new EsOpsException("aggregate 至少需要一个 EsAgg");
+        }
+        Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
+        Map<String, Aggregation> spec = new LinkedHashMap<>();
+        for (EsAgg agg : aggs) {
+            spec.put(agg.getName(), toAggregation(agg));
+        }
+        try {
+            var resp = client.search(s -> s
+                            .index(metadata.getIndexName())
+                            .query(query)
+                            .size(0)
+                            .aggregations(spec),
+                    Void.class);
+            return new EsAggResult(resp.aggregations());
+        } catch (IOException e) {
+            throw new EsOpsException("aggregate 失败: " + metadata.getIndexName(), e);
+        }
+    }
+
+    private Aggregation toAggregation(EsAgg agg) {
+        String field = metadata.fieldByProperty(agg.getProperty()).getEsFieldName();
+        return Aggregation.of(a -> switch (agg.getType()) {
+            case TERMS -> a.terms(t -> t.field(field).size(100));
+            case AVG -> a.avg(v -> v.field(field));
+            case MAX -> a.max(v -> v.field(field));
+            case MIN -> a.min(v -> v.field(field));
+            case SUM -> a.sum(v -> v.field(field));
+            case STATS -> a.stats(v -> v.field(field));
+            case CARDINALITY -> a.cardinality(v -> v.field(field));
+        });
     }
 
     private boolean isSuccess(Result result) {

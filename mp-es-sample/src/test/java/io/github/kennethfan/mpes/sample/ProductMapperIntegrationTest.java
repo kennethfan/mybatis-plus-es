@@ -1,6 +1,10 @@
 package io.github.kennethfan.mpes.sample;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import io.github.kennethfan.mpes.agg.EsAgg;
+import io.github.kennethfan.mpes.agg.EsAggResult;
+import io.github.kennethfan.mpes.highlight.EsHighlight;
+import io.github.kennethfan.mpes.highlight.EsHit;
 import io.github.kennethfan.mpes.page.Page;
 import io.github.kennethfan.mpes.sample.entity.Product;
 import io.github.kennethfan.mpes.sample.mapper.ProductMapper;
@@ -212,5 +216,56 @@ class ProductMapperIntegrationTest {
         // 越界窗口应抛异常
         assertThrows(EsOpsException.class,
                 () -> mapper.selectPage(new Page<>(2, 9000), null));
+    }
+
+    // ---------- 高亮 ----------
+
+    @Test
+    void highlight() {
+        seedThree();
+
+        List<EsHit<Product>> hits = mapper.selectHighlighted(
+                new EsLambdaQueryWrapper<Product>().match(Product::getDescription, "无线"),
+                EsHighlight.of(Product::getProductName, Product::getDescription).preTag("<b>").postTag("</b>"));
+
+        assertEquals(1, hits.size());
+        EsHit<Product> hit = hits.get(0);
+        assertEquals(ID_2, hit.getEntity().getId());
+
+        // text 字段高亮：分词片段含自定义 <b> 标签
+        List<String> descFragments = hit.highlightsOf("description");
+        assertTrue(descFragments != null && descFragments.stream().anyMatch(s -> s.contains("<b>")),
+                "description 应含 <b> 标签的高亮片段: " + descFragments);
+    }
+
+    // ---------- 聚合 ----------
+
+    @Test
+    void aggregation() {
+        seedThree();
+
+        EsAggResult result = mapper.aggregate(new EsLambdaQueryWrapper<Product>()
+                        .le(Product::getPrice, new BigDecimal("3000")),
+                EsAgg.terms(Product::getOnSale),
+                EsAgg.avg(Product::getPrice).as("avgPrice"),
+                EsAgg.max(Product::getPrice).as("maxPrice"),
+                EsAgg.stats(Product::getStock),
+                EsAgg.cardinality(Product::getProductName));
+
+        // terms：boolean 字段的桶键为 ES 原生数值语义（true→1 / false→0）
+        var buckets = result.buckets("onSale");
+        assertEquals(2, buckets.size());
+        assertTrue(buckets.stream().anyMatch(b -> Long.valueOf(1L).equals(b.getKey()) && b.getCount() == 2));
+        assertTrue(buckets.stream().anyMatch(b -> Long.valueOf(0L).equals(b.getKey()) && b.getCount() == 1));
+
+        // avg：(399 + 129.5 + 2899) / 3 = 1142.5
+        assertEquals(1142.5, result.value("avgPrice"), 0.01);
+        assertEquals(2899.0, result.value("maxPrice"), 0.01);
+
+        // stats：库存 100 + 50 + 10 = 160
+        assertEquals(160L, result.stats("stock").getSum().longValue());
+
+        // cardinality：三个不同商品名（未 as() 时聚合名默认为属性名）
+        assertEquals(3.0, result.value("productName"), 0.001);
     }
 }
