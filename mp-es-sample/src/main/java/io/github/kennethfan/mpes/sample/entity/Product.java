@@ -3,11 +3,15 @@ package io.github.kennethfan.mpes.sample.entity;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import io.github.kennethfan.mpes.annotation.EsGeoPoint;
+import io.github.kennethfan.mpes.annotation.EsNested;
 import io.github.kennethfan.mpes.annotation.EsText;
+import io.github.kennethfan.mpes.geo.GeoPoint;
 import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * 示例实体：商品（Q11，六类字段类型全覆盖）。
@@ -42,4 +46,12 @@ public class Product {
 
     /** 布尔 */
     private Boolean onSale;
+
+    /** geo_point：坐标（@EsGeoPoint 显式标注，类型必须是 GeoPoint） */
+    @EsGeoPoint
+    private GeoPoint location;
+
+    /** nested：SKU 子文档（List<子实体> 声明） */
+    @EsNested
+    private List<Sku> skus;
 }

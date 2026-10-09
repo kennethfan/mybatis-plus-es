@@ -3,11 +3,15 @@ package io.github.kennethfan.mpes.agg;
 import io.github.kennethfan.mpes.core.SFunction;
 import io.github.kennethfan.mpes.support.LambdaUtils;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * 聚合描述（Lambda 静态工厂，API 对齐 MP 风格）。
  * <p>
  * 一期七种：terms / avg / max / min / sum / stats / cardinality；
- * 聚合名默认取属性名，可 {@link #as(String)} 显式命名。嵌套子聚合留三期。
+ * 聚合名默认取属性名，可 {@link #as(String)} 显式命名；三期支持 {@link #subAgg(EsAgg...)} 桶内嵌套。
  */
 public class EsAgg {
 
@@ -15,6 +19,7 @@ public class EsAgg {
 
     private final Type type;
     private final String property;
+    private final List<EsAgg> children = new ArrayList<>();
     private String name;
 
     private EsAgg(Type type, String property) {
@@ -59,12 +64,28 @@ public class EsAgg {
         return this;
     }
 
+    /**
+     * 挂载子聚合（仅 terms 类分桶聚合有意义；支持任意深度链式嵌套）。
+     * 子聚合名在每个桶内独立命名，与兄弟层级无冲突。
+     */
+    public EsAgg subAgg(EsAgg... children) {
+        if (children == null || children.length == 0) {
+            throw new IllegalArgumentException("subAgg 至少需要一个子聚合");
+        }
+        this.children.addAll(Arrays.asList(children));
+        return this;
+    }
+
     public Type getType() {
         return type;
     }
 
     public String getProperty() {
         return property;
+    }
+
+    public List<EsAgg> getChildren() {
+        return children;
     }
 
     public String getName() {

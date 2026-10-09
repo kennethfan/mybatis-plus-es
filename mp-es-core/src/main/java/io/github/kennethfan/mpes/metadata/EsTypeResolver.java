@@ -1,6 +1,7 @@
 package io.github.kennethfan.mpes.metadata;
 
 import io.github.kennethfan.mpes.annotation.EsText;
+import io.github.kennethfan.mpes.geo.GeoPoint;
 import io.github.kennethfan.mpes.support.EsOpsException;
 
 import java.math.BigDecimal;
@@ -59,8 +60,12 @@ public final class EsTypeResolver {
         if (isDateType(javaType)) {
             return "date";
         }
+        if (javaType == GeoPoint.class) {
+            return "geo_point";
+        }
         throw new EsOpsException("不支持的实体字段类型: " + javaType.getName()
-                + "，一期支持 keyword/text/数值/boolean/date（可用 @TableField(exist=false) 排除该字段）");
+                + "（geo 字段用 GeoPoint 类型，nested 字段用 @EsNested + List<子实体>，"
+                + "或用 @TableField(exist=false) 排除）");
     }
 
     private static boolean isDateType(Class<?> type) {

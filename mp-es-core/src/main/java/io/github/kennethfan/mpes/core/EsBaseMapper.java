@@ -4,6 +4,8 @@ import io.github.kennethfan.mpes.agg.EsAgg;
 import io.github.kennethfan.mpes.agg.EsAggResult;
 import io.github.kennethfan.mpes.highlight.EsHighlight;
 import io.github.kennethfan.mpes.highlight.EsHit;
+import io.github.kennethfan.mpes.page.EsAfter;
+import io.github.kennethfan.mpes.page.EsAfterResult;
 import io.github.kennethfan.mpes.page.Page;
 import io.github.kennethfan.mpes.wrapper.EsLambdaQueryWrapper;
 
@@ -50,6 +52,9 @@ public interface EsBaseMapper<T> {
 
     /** 分页查询（from+size，窗口上限 10000） */
     Page<T> selectPage(Page<T> page, EsLambdaQueryWrapper<T> wrapper);
+
+    /** 深分页（search_after 游标，无 10000 窗口限制；首页用 EsAfter.first(size)，翻页用 result.getNext()） */
+    EsAfterResult<T> selectAfter(EsAfter after, EsLambdaQueryWrapper<T> wrapper);
 
     /** 高亮检索：返回实体 + 高亮片段（highlight 中字段需与查询条件配合使用） */
     List<EsHit<T>> selectHighlighted(EsLambdaQueryWrapper<T> wrapper, EsHighlight<T> highlight);

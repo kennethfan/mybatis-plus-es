@@ -23,11 +23,11 @@ public class EsAggResult {
         Aggregate agg = require(name);
         return switch (agg._kind()) {
             case Sterms -> agg.sterms().buckets().array().stream()
-                    .map(b -> new EsBucket(b.key(), b.docCount())).toList();
+                    .map(b -> new EsBucket(b.key(), b.docCount(), new EsAggResult(b.aggregations()))).toList();
             case Lterms -> agg.lterms().buckets().array().stream()
-                    .map(b -> new EsBucket(b.key(), b.docCount())).toList();
+                    .map(b -> new EsBucket(b.key(), b.docCount(), new EsAggResult(b.aggregations()))).toList();
             case Dterms -> agg.dterms().buckets().array().stream()
-                    .map(b -> new EsBucket(b.key(), b.docCount())).toList();
+                    .map(b -> new EsBucket(b.key(), b.docCount(), new EsAggResult(b.aggregations()))).toList();
             default -> throw new EsOpsException("聚合 " + name + " 不是 terms 类型: " + agg._kind());
         };
     }

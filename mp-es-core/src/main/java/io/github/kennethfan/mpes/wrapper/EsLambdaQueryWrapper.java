@@ -1,6 +1,7 @@
 package io.github.kennethfan.mpes.wrapper;
 
 import io.github.kennethfan.mpes.core.SFunction;
+import io.github.kennethfan.mpes.geo.GeoPoint;
 import io.github.kennethfan.mpes.support.LambdaUtils;
 import lombok.Getter;
 
@@ -25,12 +26,18 @@ import java.util.function.Consumer;
  */
 public class EsLambdaQueryWrapper<T> {
 
-    enum Op { EQ, NE, IN, GT, GE, LT, LE, BETWEEN, LIKE, MATCH, IS_NULL }
+    enum Op { EQ, NE, IN, GT, GE, LT, LE, BETWEEN, LIKE, MATCH, IS_NULL, GEO_DISTANCE }
 
-    /** 叶子条件：操作符 + 属性名 + 值 */
+    /** 叶子条件：操作符 + 属性名 + 值（GEO_DISTANCE 时 values = [distance, GeoPoint]） */
     record Leaf(Op op, String property, List<Object> values) {}
 
+    /** nested 子文档条件：属性名 + 作用于子实体类型的子 Wrapper */
+    record NestedLeaf(String property, EsLambdaQueryWrapper<?> inner) {}
+
     record SortSpec(String property, boolean asc) {}
+
+    /** geo_distance 排序：以 origin 为基准按距离升/降序 */
+    record GeoDistanceSortSpec(String property, GeoPoint origin, boolean asc) {}
 
     /** 条件节点：orToPrevious 表示与前一节点以 OR 连接；content 为 Leaf 或嵌套 Wrapper（分组） */
     record Node(boolean orToPrevious, Object content) {}
@@ -40,6 +47,9 @@ public class EsLambdaQueryWrapper<T> {
 
     @Getter
     private final List<SortSpec> sorts = new ArrayList<>();
+
+    @Getter
+    private final List<GeoDistanceSortSpec> geoSorts = new ArrayList<>();
 
     private boolean pendingOr;
 
@@ -96,6 +106,27 @@ public class EsLambdaQueryWrapper<T> {
         return add(Op.IS_NULL, col);
     }
 
+    /** geo_distance 距离过滤，仅用于 geo_point 字段（distance 如 "1500km"） */
+    public EsLambdaQueryWrapper<T> geoDistance(SFunction<T, ?> col, String distance, GeoPoint origin) {
+        return add(Op.GEO_DISTANCE, col, distance, origin);
+    }
+
+    /**
+     * nested 子文档条件（仅用于 @EsNested 字段）。childType 为子实体类型见证参数，
+     * 保证 lambda 内的方法引用获得正确的子实体类型。
+     * <pre>{@code
+     * wrapper.nested(Product::getSkus, Sku.class, w -> w.eq(Sku::getSkuCode, "SKU-A1"))
+     * }</pre>
+     */
+    public <C> EsLambdaQueryWrapper<T> nested(SFunction<T, ?> col, Class<C> childType,
+                                              Consumer<EsLambdaQueryWrapper<C>> consumer) {
+        EsLambdaQueryWrapper<C> sub = new EsLambdaQueryWrapper<>();
+        consumer.accept(sub);
+        nodes.add(new Node(pendingOr, new NestedLeaf(LambdaUtils.propertyName(col), sub)));
+        pendingOr = false;
+        return this;
+    }
+
     /** 下一条件以 OR 连接 */
     public EsLambdaQueryWrapper<T> or() {
         pendingOr = true;
@@ -132,6 +163,12 @@ public class EsLambdaQueryWrapper<T> {
         for (SFunction<T, ?> col : cols) {
             sorts.add(new SortSpec(LambdaUtils.propertyName(col), false));
         }
+        return this;
+    }
+
+    /** 按到 origin 的距离排序，仅用于 geo_point 字段 */
+    public EsLambdaQueryWrapper<T> orderByGeoDistance(SFunction<T, ?> col, GeoPoint origin, boolean asc) {
+        geoSorts.add(new GeoDistanceSortSpec(LambdaUtils.propertyName(col), origin, asc));
         return this;
     }
 

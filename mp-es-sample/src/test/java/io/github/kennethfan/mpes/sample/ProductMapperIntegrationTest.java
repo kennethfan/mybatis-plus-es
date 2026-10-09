@@ -3,10 +3,15 @@ package io.github.kennethfan.mpes.sample;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import io.github.kennethfan.mpes.agg.EsAgg;
 import io.github.kennethfan.mpes.agg.EsAggResult;
+import io.github.kennethfan.mpes.agg.EsBucket;
+import io.github.kennethfan.mpes.geo.GeoPoint;
 import io.github.kennethfan.mpes.highlight.EsHighlight;
 import io.github.kennethfan.mpes.highlight.EsHit;
+import io.github.kennethfan.mpes.page.EsAfter;
+import io.github.kennethfan.mpes.page.EsAfterResult;
 import io.github.kennethfan.mpes.page.Page;
 import io.github.kennethfan.mpes.sample.entity.Product;
+import io.github.kennethfan.mpes.sample.entity.Sku;
 import io.github.kennethfan.mpes.sample.mapper.ProductMapper;
 import io.github.kennethfan.mpes.support.EsOpsException;
 import io.github.kennethfan.mpes.wrapper.EsLambdaQueryWrapper;
@@ -94,10 +99,30 @@ class ProductMapperIntegrationTest {
     }
 
     private void seedThree() {
-        mapper.insert(product(ID_1, "机械键盘 K870", "客制化机械键盘 红轴", "399.00", 100, "2026-01-15", true));
-        mapper.insert(product(ID_2, "无线鼠标 M590", "静音无线鼠标 办公首选", "129.50", 50, "2026-03-01", true));
-        mapper.insert(product(ID_3, "显示器 U2723", "4K 专业显示器", "2899.00", 10, "2026-06-20", false));
+        Product p1 = product(ID_1, "机械键盘 K870", "客制化机械键盘 红轴", "399.00", 100, "2026-01-15", true);
+        p1.setLocation(new GeoPoint(39.90, 116.40));    // 北京
+        p1.setSkus(List.of(sku("SKU-A1", "红轴 87键", 60)));
+
+        Product p2 = product(ID_2, "无线鼠标 M590", "静音无线鼠标 办公首选", "129.50", 50, "2026-03-01", true);
+        p2.setLocation(new GeoPoint(31.23, 121.47));    // 上海
+        p2.setSkus(List.of(sku("SKU-B2", "静音款", 80)));
+
+        Product p3 = product(ID_3, "显示器 U2723", "4K 专业显示器", "2899.00", 10, "2026-06-20", false);
+        p3.setLocation(new GeoPoint(22.54, 114.06));    // 深圳
+        p3.setSkus(List.of(sku("SKU-C3", "4K", 5), sku("SKU-D4", "2K", 10)));
+
+        mapper.insert(p1);
+        mapper.insert(p2);
+        mapper.insert(p3);
         refresh();
+    }
+
+    private Sku sku(String code, String spec, int quantity) {
+        Sku s = new Sku();
+        s.setSkuCode(code);
+        s.setSpec(spec);
+        s.setQuantity(quantity);
+        return s;
     }
 
     // ---------- CRUD 生命周期 ----------
@@ -267,5 +292,132 @@ class ProductMapperIntegrationTest {
 
         // cardinality：三个不同商品名（未 as() 时聚合名默认为属性名）
         assertEquals(3.0, result.value("productName"), 0.001);
+    }
+
+    // ---------- 嵌套子聚合 ----------
+
+    @Test
+    void subAggregation() {
+        seedThree();
+
+        EsAggResult result = mapper.aggregate(null,
+                EsAgg.terms(Product::getOnSale).subAgg(
+                        EsAgg.avg(Product::getPrice).as("avgPrice"),
+                        EsAgg.max(Product::getPrice).as("maxPrice")));
+
+        List<EsBucket> buckets = result.buckets("onSale");
+        assertEquals(2, buckets.size());
+        for (EsBucket bucket : buckets) {
+            boolean onSale = Long.valueOf(1L).equals(bucket.getKey());
+            if (onSale) {
+                // 在售两件：(399.00 + 129.50) / 2 = 264.25，最大 399.00
+                assertEquals(264.25, bucket.getAggs().value("avgPrice"), 0.01);
+                assertEquals(399.0, bucket.getAggs().value("maxPrice"), 0.01);
+            } else {
+                assertEquals(2899.0, bucket.getAggs().value("avgPrice"), 0.01);
+                assertEquals(2899.0, bucket.getAggs().value("maxPrice"), 0.01);
+            }
+        }
+    }
+
+    // ---------- search_after 深分页 ----------
+
+    @Test
+    void searchAfterPaging() {
+        seedThree();
+
+        // 在售 2 条，每批 1 条游标翻页：不重不漏，最后 next == null
+        EsAfterResult<Product> page1 = mapper.selectAfter(EsAfter.first(1),
+                new EsLambdaQueryWrapper<Product>().eq(Product::getOnSale, true));
+        assertEquals(2, page1.getTotal());
+        assertEquals(1, page1.getRecords().size());
+        assertTrue(page1.getNext() != null, "还有剩余数据时 next 不应为 null");
+
+        EsAfterResult<Product> page2 = mapper.selectAfter(page1.getNext(),
+                new EsLambdaQueryWrapper<Product>().eq(Product::getOnSale, true));
+        assertEquals(1, page2.getRecords().size());
+        assertNull(page2.getNext(), "取完最后一批后 next 应为 null");
+
+        // 两页合并 = 全量且无重复
+        List<Long> allIds = List.of(
+                page1.getRecords().get(0).getId(),
+                page2.getRecords().get(0).getId());
+        assertEquals(2, allIds.stream().distinct().count());
+        assertTrue(allIds.containsAll(List.of(ID_1, ID_2)));
+
+        // 单批大于总量：一次取完，next == null
+        EsAfterResult<Product> all = mapper.selectAfter(EsAfter.first(10),
+                new EsLambdaQueryWrapper<Product>().eq(Product::getOnSale, true));
+        assertEquals(2, all.getRecords().size());
+        assertNull(all.getNext());
+
+        // 带 orderBy 的游标翻页（验证强制 _id 二级排序不破坏业务排序）
+        EsAfterResult<Product> sorted = mapper.selectAfter(EsAfter.first(1),
+                new EsLambdaQueryWrapper<Product>().eq(Product::getOnSale, true)
+                        .orderByDesc(Product::getPrice));
+        assertEquals(ID_1, sorted.getRecords().get(0).getId());  // 399.00 在售最高
+    }
+
+    // ---------- Geo ----------
+
+    @Test
+    void geoDistanceQueryAndSort() {
+        seedThree();
+
+        // geo_distance：距北京 1500km 内 → 北京 + 上海（深圳约 1945km 被排除）
+        List<Product> near = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .geoDistance(Product::getLocation, "1500km", new GeoPoint(39.90, 116.40)));
+        assertEquals(2, near.size());
+        assertTrue(near.stream().allMatch(p -> p.getId() == ID_1 || p.getId() == ID_2));
+
+        // 距离升序：北京 → 上海 → 深圳
+        List<Product> byDistance = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .orderByGeoDistance(Product::getLocation, new GeoPoint(39.90, 116.40), true));
+        assertEquals(List.of(ID_1, ID_2, ID_3), byDistance.stream().map(Product::getId).toList());
+
+        // geo 条件与普通条件组合：1500km 内且在售 → 北京 + 上海（两者均在售）
+        List<Product> combined = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .geoDistance(Product::getLocation, "1500km", new GeoPoint(39.90, 116.40))
+                .eq(Product::getOnSale, true));
+        assertEquals(2, combined.size());
+        assertTrue(combined.stream().allMatch(p -> p.getId() == ID_1 || p.getId() == ID_2));
+    }
+
+    // ---------- Nested ----------
+
+    @Test
+    void nestedQueryAndRoundTrip() {
+        seedThree();
+
+        // nested 条件：SKU 编号 SKU-A1 → 仅北京仓商品
+        List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .nested(Product::getSkus, Sku.class, w -> w.eq(Sku::getSkuCode, "SKU-A1")));
+        assertEquals(1, hits.size());
+        assertEquals(ID_1, hits.get(0).getId());
+
+        // nested 内多条件（AND）：spec=4K 且 quantity<=5 → 仅深圳
+        List<Product> combined = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .nested(Product::getSkus, Sku.class, w -> w.eq(Sku::getSpec, "4K").le(Sku::getQuantity, 5)));
+        assertEquals(1, combined.size());
+        assertEquals(ID_3, combined.get(0).getId());
+
+        // nested 条件与顶层条件组合：SKU-A1 且在售 → 北京
+        assertEquals(1, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .nested(Product::getSkus, Sku.class, w -> w.eq(Sku::getSkuCode, "SKU-A1"))
+                .eq(Product::getOnSale, true)).size());
+
+        // 写入→读取往返：nested 子文档字段重命名可逆，子实体完整还原
+        Product loaded = mapper.selectById(ID_3);
+        assertEquals(2, loaded.getSkus().size());
+        assertEquals("SKU-C3", loaded.getSkus().get(0).getSkuCode());
+        assertEquals("4K", loaded.getSkus().get(0).getSpec());
+        assertEquals(5, loaded.getSkus().get(0).getQuantity());
+
+        // geo + nested 同时使用：距北京 1500km 内且含 SKU-B2 → 上海
+        List<Product> both = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .geoDistance(Product::getLocation, "1500km", new GeoPoint(39.90, 116.40))
+                .nested(Product::getSkus, Sku.class, w -> w.eq(Sku::getSkuCode, "SKU-B2")));
+        assertEquals(1, both.size());
+        assertEquals(ID_2, both.get(0).getId());
     }
 }

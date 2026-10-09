@@ -31,6 +31,9 @@ public class FieldMetadata {
     /** 是否为主键字段（@TableId，映射为 ES 文档 _id） */
     private final boolean idField;
 
+    /** nested 子实体元数据（仅 esType=nested 时非空） */
+    private final EntityMetadata nestedMetadata;
+
     /** 从实体实例读取该字段值 */
     public Object readValue(Object entity) {
         try {

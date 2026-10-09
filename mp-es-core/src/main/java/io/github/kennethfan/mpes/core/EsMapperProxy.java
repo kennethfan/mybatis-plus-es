@@ -20,6 +20,8 @@ import io.github.kennethfan.mpes.highlight.EsHighlight;
 import io.github.kennethfan.mpes.highlight.EsHit;
 import io.github.kennethfan.mpes.metadata.EntityMetadata;
 import io.github.kennethfan.mpes.metadata.FieldMetadata;
+import io.github.kennethfan.mpes.page.EsAfter;
+import io.github.kennethfan.mpes.page.EsAfterResult;
 import io.github.kennethfan.mpes.page.Page;
 import io.github.kennethfan.mpes.support.EsOpsException;
 import io.github.kennethfan.mpes.wrapper.EsLambdaQueryWrapper;
@@ -29,6 +31,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -74,6 +77,7 @@ public class EsMapperProxy<T> implements InvocationHandler {
             case "selectList" -> selectList((EsLambdaQueryWrapper<?>) args[0]);
             case "selectOne" -> selectOne((EsLambdaQueryWrapper<?>) args[0]);
             case "selectPage" -> selectPage((Page<?>) args[0], (EsLambdaQueryWrapper<?>) args[1]);
+            case "selectAfter" -> selectAfter((EsAfter) args[0], (EsLambdaQueryWrapper<?>) args[1]);
             case "selectHighlighted" -> selectHighlighted(
                     (EsLambdaQueryWrapper<?>) args[0], (EsHighlight<?>) args[1]);
             case "aggregate" -> aggregate((EsLambdaQueryWrapper<?>) args[0], (EsAgg[]) args[1]);
@@ -170,33 +174,77 @@ public class EsMapperProxy<T> implements InvocationHandler {
         }
     }
 
-    /** 实体 → 非 null 字段的 Map（写入载荷；键为 ES 字段名，主键字段一并写入 _source 保持完整） */
+    /** 实体 → 非 null 字段的 Map（写入载荷；键为 ES 字段名，主键字段一并写入 _source 保持完整；nested 字段递归重命名） */
     private Map<String, Object> toDocument(Object entity) {
         Map<String, Object> raw = objectMapper.convertValue(entity, Map.class);
+        return renameToDocument(raw, metadata);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> renameToDocument(Map<String, Object> raw, EntityMetadata md) {
         Map<String, Object> doc = new LinkedHashMap<>();
-        for (FieldMetadata f : metadata.getFields()) {
+        for (FieldMetadata f : md.getFields()) {
             Object v = raw.get(f.getProperty());
-            if (v != null) {
-                doc.put(f.getEsFieldName(), v);
+            if (v == null) {
+                continue;
             }
+            if (f.getNestedMetadata() != null) {
+                v = renameNestedToDocument(v, f.getNestedMetadata());
+            }
+            doc.put(f.getEsFieldName(), v);
         }
         return doc;
     }
 
-    /** _source（ES 字段名）→ 实体（属性名） */
+    /** nested 字段值：List<子实体Map> 或单个子实体Map，逐层递归重命名 */
     @SuppressWarnings("unchecked")
+    private Object renameNestedToDocument(Object v, EntityMetadata nestedMd) {
+        if (v instanceof List<?> list) {
+            List<Object> out = new ArrayList<>();
+            for (Object element : list) {
+                out.add(renameToDocument((Map<String, Object>) element, nestedMd));
+            }
+            return out;
+        }
+        return renameToDocument((Map<String, Object>) v, nestedMd);
+    }
+
+    /** _source（ES 字段名）→ 实体（属性名）；nested 字段递归重命名 */
     private <E> E toEntity(Object source) {
         if (source == null) {
             return null;
         }
         Map<String, Object> raw = objectMapper.convertValue(source, Map.class);
-        Map<String, Object> renamed = new LinkedHashMap<>();
-        for (FieldMetadata f : metadata.getFields()) {
-            if (raw.containsKey(f.getEsFieldName())) {
-                renamed.put(f.getProperty(), raw.get(f.getEsFieldName()));
-            }
-        }
+        Map<String, Object> renamed = renameToEntity(raw, metadata);
         return (E) objectMapper.convertValue(renamed, metadata.getEntityClass());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> renameToEntity(Map<String, Object> raw, EntityMetadata md) {
+        Map<String, Object> renamed = new LinkedHashMap<>();
+        for (FieldMetadata f : md.getFields()) {
+            if (!raw.containsKey(f.getEsFieldName())) {
+                continue;
+            }
+            Object v = raw.get(f.getEsFieldName());
+            if (f.getNestedMetadata() != null) {
+                v = renameNestedToEntity(v, f.getNestedMetadata());
+            }
+            renamed.put(f.getProperty(), v);
+        }
+        return renamed;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object renameNestedToEntity(Object v, EntityMetadata nestedMd) {
+        if (v instanceof List<?> list) {
+            List<Object> out = new ArrayList<>();
+            for (Object element : list) {
+                out.add(renameToEntity((Map<String, Object>) element, nestedMd));
+            }
+            return out;
+        }
+        return renameToEntity((Map<String, Object>) v, nestedMd);
     }
 
     // ---------- 查询 ----------
@@ -313,6 +361,54 @@ public class EsMapperProxy<T> implements InvocationHandler {
         }
     }
 
+    // ---------- search_after 深分页 ----------
+
+    @SuppressWarnings("unchecked")
+    private <E> EsAfterResult<E> selectAfter(EsAfter after, EsLambdaQueryWrapper<?> wrapper) {
+        if (after == null) {
+            throw new EsOpsException("selectAfter 需要 EsAfter 游标（首页用 EsAfter.first(size)）");
+        }
+        Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
+        List<co.elastic.clients.elasticsearch._types.SortOptions> sorts =
+                new ArrayList<>(EsQueryTranslator.toSorts(wrapper, fieldResolver));
+        // search_after 要求全序：追加主键字段兜底排序（_id 禁止 fielddata 排序，主键同时存在于 _source）
+        String idField = metadata.getIdField().getEsFieldName();
+        boolean hasIdSort = sorts.stream()
+                .filter(co.elastic.clients.elasticsearch._types.SortOptions::isField)
+                .anyMatch(so -> idField.equals(so.field().field()));
+        if (!hasIdSort) {
+            sorts.add(co.elastic.clients.elasticsearch._types.SortOptions.of(
+                    s -> s.field(f -> f.field(idField).order(co.elastic.clients.elasticsearch._types.SortOrder.Asc))));
+        }
+        try {
+            // 多取一条用于判定是否还有下一批（最后一批恰好填满时 size==hits 无法区分）
+            var resp = client.search(s -> {
+                s.index(metadata.getIndexName())
+                        .query(query)
+                        .sort(sorts)
+                        .size(after.getSize() + 1)
+                        .trackTotalHits(t -> t.enabled(true));
+                if (after.getSearchAfter() != null) {
+                    s.searchAfter(after.getSearchAfter());
+                }
+                return s;
+            }, Map.class);
+
+            List<Hit<Map>> hits = resp.hits().hits();
+            boolean hasMore = hits.size() > after.getSize();
+            List<Hit<Map>> page = hasMore ? hits.subList(0, after.getSize()) : hits;
+            List<?> records = page.stream().map(h -> toEntity(h.source())).toList();
+
+            EsAfter next = hasMore
+                    ? EsAfter.of(after.getSize(), page.get(page.size() - 1).sort())
+                    : null;
+            long total = resp.hits().total() == null ? records.size() : resp.hits().total().value();
+            return new EsAfterResult<>((List<E>) records, next, total);
+        } catch (IOException e) {
+            throw new EsOpsException("selectAfter 失败: " + metadata.getIndexName(), e);
+        }
+    }
+
     // ---------- 高亮 ----------
 
     @SuppressWarnings("unchecked")
@@ -384,14 +480,28 @@ public class EsMapperProxy<T> implements InvocationHandler {
 
     private Aggregation toAggregation(EsAgg agg) {
         String field = metadata.fieldByProperty(agg.getProperty()).getEsFieldName();
-        return Aggregation.of(a -> switch (agg.getType()) {
-            case TERMS -> a.terms(t -> t.field(field).size(100));
-            case AVG -> a.avg(v -> v.field(field));
-            case MAX -> a.max(v -> v.field(field));
-            case MIN -> a.min(v -> v.field(field));
-            case SUM -> a.sum(v -> v.field(field));
-            case STATS -> a.stats(v -> v.field(field));
-            case CARDINALITY -> a.cardinality(v -> v.field(field));
+        Map<String, Aggregation> sub = new LinkedHashMap<>();
+        for (EsAgg child : agg.getChildren()) {
+            sub.put(child.getName(), toAggregation(child));
+        }
+        // 8.19 客户端：a.terms()/a.avg() 等返回 ContainerBuilder，子聚合挂在它上面
+        return Aggregation.of(a -> {
+            Aggregation.Builder.ContainerBuilder c = switch (agg.getType()) {
+                case TERMS -> a.terms(t -> {
+                    t.field(field).size(100);
+                    return t;
+                });
+                case AVG -> a.avg(v -> v.field(field));
+                case MAX -> a.max(v -> v.field(field));
+                case MIN -> a.min(v -> v.field(field));
+                case SUM -> a.sum(v -> v.field(field));
+                case STATS -> a.stats(v -> v.field(field));
+                case CARDINALITY -> a.cardinality(v -> v.field(field));
+            };
+            if (!sub.isEmpty()) {
+                c.aggregations(sub);
+            }
+            return c;
         });
     }
 

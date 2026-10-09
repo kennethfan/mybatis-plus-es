@@ -56,12 +56,17 @@ public class IndexManager {
     }
 
     private void create(EntityMetadata md) throws IOException {
+        client.indices().create(c -> c.index(md.getIndexName()).mappings(m -> m.properties(propertiesOf(md))));
+        log.info("[mp-es] 已创建索引 {}（{} 个字段）", md.getIndexName(), md.getFields().size());
+    }
+
+    /** 实体元数据 → ES mapping properties（nested 字段递归展开子实体） */
+    private Map<String, Property> propertiesOf(EntityMetadata md) {
         Map<String, Property> props = new LinkedHashMap<>();
         for (FieldMetadata f : md.getFields()) {
             props.put(f.getEsFieldName(), propertyOf(f));
         }
-        client.indices().create(c -> c.index(md.getIndexName()).mappings(m -> m.properties(props)));
-        log.info("[mp-es] 已创建索引 {}（{} 个字段）", md.getIndexName(), md.getFields().size());
+        return props;
     }
 
     private Property propertyOf(FieldMetadata f) {
@@ -76,6 +81,9 @@ public class IndexManager {
             case "float" -> Property.of(p -> p.float_(fl -> fl));
             case "boolean" -> Property.of(p -> p.boolean_(b -> b));
             case "date" -> Property.of(p -> p.date(d -> d));
+            case "geo_point" -> Property.of(p -> p.geoPoint(g -> g));
+            case "nested" -> Property.of(p -> p.nested(n -> n
+                    .properties(propertiesOf(f.getNestedMetadata()))));
             default -> throw new EsOpsException("未知 ES 字段类型: " + f.getEsType());
         };
     }
