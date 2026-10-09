@@ -47,6 +47,8 @@ public final class EsQueryTranslator {
             Query q;
             if (node.content() instanceof EsLambdaQueryWrapper.Leaf leaf) {
                 q = leafQuery(leaf, resolver, prefix);
+            } else if (node.content() instanceof EsLambdaQueryWrapper.MultiMatchLeaf mm) {
+                q = multiMatchQuery(mm, resolver, prefix);
             } else if (node.content() instanceof EsLambdaQueryWrapper.NestedLeaf nested) {
                 q = nestedQuery(nested, resolver, prefix);
             } else {
@@ -110,9 +112,29 @@ public final class EsQueryTranslator {
                 rejectText(isText, field, "like（通配符仅适用 keyword 字段，text 请使用 match）");
                 yield Query.of(q -> q.wildcard(w -> w.field(field).wildcard("*" + values.get(0) + "*")));
             }
-            case MATCH -> Query.of(q -> q.match(m -> m.field(field).query(String.valueOf(values.get(0)))));
+            case MATCH -> Query.of(q -> q.match(m -> {
+                m.field(field).query(String.valueOf(values.get(0)));
+                if (leaf.boost() != null) {
+                    m.boost(leaf.boost());
+                }
+                return m;
+            }));
             case IS_NULL -> Query.of(q -> q.bool(b -> b.mustNot(
                     m -> m.exists(e -> e.field(field)))));
+            case FUZZY -> {
+                rejectText(isText, field, "fuzzy（容错仅适用 keyword 字段，text 请使用 match）");
+                String fuzziness = String.valueOf(values.get(1));
+                yield Query.of(q -> q.fuzzy(f -> f
+                        .field(field)
+                        .value(String.valueOf(values.get(0)))
+                        .fuzziness(fuzziness)));
+            }
+            case PREFIX -> {
+                rejectText(isText, field, "prefix（前缀仅适用 keyword 字段，text 请使用 match）");
+                yield Query.of(q -> q.prefix(p -> p
+                        .field(field)
+                        .value(String.valueOf(values.get(0)))));
+            }
             case GEO_DISTANCE -> {
                 if (!"geo_point".equals(fm.getEsType())) {
                     throw new EsOpsException("字段 " + field + " 不是 geo_point 类型，不能使用 geoDistance");
@@ -124,6 +146,22 @@ public final class EsQueryTranslator {
                         .location(l -> l.latlon(ll -> ll.lat(origin.getLat()).lon(origin.getLon())))));
             }
         };
+    }
+
+    /** multi_match 跨字段检索：字段名经 resolver 转 ES 字段名（支持 nested 前缀） */
+    private static Query multiMatchQuery(EsLambdaQueryWrapper.MultiMatchLeaf mm,
+                                         FieldResolver resolver, String prefix) {
+        List<String> fields = mm.properties().stream()
+                .map(p -> prefix + resolver.apply(p).getEsFieldName())
+                .toList();
+        Float boost = mm.boost();
+        return Query.of(q -> q.multiMatch(m -> {
+            m.fields(fields).query(String.valueOf(mm.value()));
+            if (boost != null) {
+                m.boost(boost);
+            }
+            return m;
+        }));
     }
 
     /** nested 子文档条件：path 为 nested 字段的完整路径，内部用子实体元数据递归翻译（字段带 path 前缀） */

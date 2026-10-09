@@ -430,6 +430,77 @@ class ProductMapperIntegrationTest {
         assertEquals(0, mapper.selectById(ID_2).getPrice().compareTo(new BigDecimal("129.50")));
     }
 
+    // ---------- 查询增强：multiMatch / fuzzy / prefix / boost ----------
+
+    @Test
+    void multiMatchAndBoost() {
+        seedThree();
+
+        // multi_match 跨字段："静音" 命中 ID_2 的 description
+        List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch("静音", Product::getProductName, Product::getDescription));
+        assertEquals(1, hits.size());
+        assertEquals(ID_2, hits.get(0).getId());
+
+        // boost 调整 or 场景相关性排序：键盘 加权 10 倍 → ID_1 排前（match 仅适用 text 字段）
+        List<Product> boosted = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .match(Product::getDescription, "键盘", 10f)
+                .or()
+                .match(Product::getDescription, "鼠标"));
+        assertEquals(2, boosted.size());
+        assertEquals(ID_1, boosted.get(0).getId());
+
+        // 反向：鼠标 加权 → ID_2 排前
+        List<Product> reversed = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .match(Product::getDescription, "键盘")
+                .or()
+                .match(Product::getDescription, "鼠标", 10f));
+        assertEquals(2, reversed.size());
+        assertEquals(ID_2, reversed.get(0).getId());
+    }
+
+    @Test
+    void fuzzyQuery() {
+        seedThree();
+
+        // AUTO 容错：K871 与 "机械键盘 K870" 编辑距离 1 → 命中 ID_1
+        List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .fuzzy(Product::getProductName, "机械键盘 K871"));
+        assertEquals(1, hits.size());
+        assertEquals(ID_1, hits.get(0).getId());
+
+        // 显式 maxEdits=0：距离 1 不满足 → 无命中
+        assertEquals(0, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .fuzzy(Product::getProductName, "机械键盘 K871", 0)).size());
+
+        // 距离过远（"K860" vs 全词）→ 无命中
+        assertEquals(0, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .fuzzy(Product::getProductName, "K860")).size());
+
+        // text 字段拒绝
+        assertThrows(EsOpsException.class, () -> mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .fuzzy(Product::getDescription, "键盘")));
+    }
+
+    @Test
+    void prefixQuery() {
+        seedThree();
+
+        // keyword 前缀：机械 → 仅 ID_1
+        List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .prefix(Product::getProductName, "机械"));
+        assertEquals(1, hits.size());
+        assertEquals(ID_1, hits.get(0).getId());
+
+        // 前缀 无线 → 仅 ID_2
+        assertEquals(1, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .prefix(Product::getProductName, "无线")).size());
+
+        // text 字段拒绝
+        assertThrows(EsOpsException.class, () -> mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .prefix(Product::getDescription, "键盘")));
+    }
+
     // ---------- Geo ----------
 
     @Test

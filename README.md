@@ -2,7 +2,7 @@
 
 以 **MyBatis-Plus 风格 API 操作 Elasticsearch** 的适配层：沿用 MP 的 Mapper / Wrapper 写法，底层直连 Elasticsearch 官方 Java API Client，**不经过任何 MyBatis 执行机制**（ADR-0002）。
 
-- 构建状态：`mvn clean verify` 全绿（单元测试 6/6 + 集成测试 13/13 @ 真实 ES 8.19.0）
+- 构建状态：`mvn clean verify` 全绿（单元测试 6/6 + 集成测试 16/16 @ 真实 ES 8.19.0）
 - 版本基线：Spring Boot 3.5.16 / elasticsearch-java 8.19.23 / mybatis-plus-annotation 3.5.17 / JDK 17
 
 ## 架构决策（docs/adr/）
@@ -131,6 +131,18 @@ List<Product> list = mapper.selectList(new EsLambdaQueryWrapper<Product>()
         .match(Product::getDescription, "静音")
         .orderByDesc(Product::getPrice));
 
+// 查询增强
+mapper.selectList(new EsLambdaQueryWrapper<Product>()
+        .multiMatch("静音", Product::getProductName, Product::getDescription)   // multi_match 跨字段
+        .multiMatch(2.0f, "静音", Product::getProductName, Product::getDescription)); // 带权重
+mapper.selectList(new EsLambdaQueryWrapper<Product>()
+        .fuzzy(Product::getProductName, "机械键盘 K871")          // 容错（keyword，默认 AUTO 编辑距离）
+        .fuzzy(Product::getProductName, "K871", 1));              // 显式最大编辑距离
+mapper.selectList(new EsLambdaQueryWrapper<Product>()
+        .prefix(Product::getProductName, "机械"));                // 原生前缀（keyword，优于 like("机械*")）
+mapper.selectList(new EsLambdaQueryWrapper<Product>()
+        .match(Product::getDescription, "键盘", 10f));            // match 带权重（or 场景调相关性）
+
 // 分页（from+size，窗口上限 10000）
 Page<Product> page = mapper.selectPage(new Page<>(1, 10), wrapper);
 
@@ -179,6 +191,8 @@ List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
 ## 语义与边界（一期）
 
 - **like** 仅作用于 keyword 字段（`*v*` 通配）；text 字段使用 eq/ne/in/like 直接报错，请用 **match**
+- **fuzzy / prefix** 仅作用于 keyword 字段（text 使用直接报错，提示用 match）；fuzzy 默认 AUTO 编辑距离（3-5 字符容 1 级、6+ 字符容 2 级），可显式指定；prefix 为原生 prefix 查询，性能优于 `like("v*")` 通配符
+- **match / multiMatch** 为打分检索：`match(col, value, boost)` 与 `multiMatch(boost, value, cols...)` 提供权重重载，用于 or 场景调整相关性排序；multiMatch 默认 best_fields；**注意 match 打在 keyword 字段上为整词匹配**（keyword 无分词），前缀场景请用 prefix、包含场景请用 like
 - **AND 优先级高于 OR**：`eq(1).or().eq(2).eq(3)` → `(1 OR 2) AND 3`；嵌套分组用 `and(w -> ...) / or(w -> ...)`
 - **wrapper 可传 null**：`selectCount(null)` / `selectPage(page, null)` 即全量语义（match_all）
 - 分页为 `from+size`，超出 10000 抛异常；**search_after** 无窗口限制（每批上限 10000，强制追加主键字段兜底排序保证全序，`_id` 禁止 fielddata 排序故用 `_source` 主键）
@@ -207,4 +221,4 @@ mvn clean verify            # 单元测试无需 ES；集成测试在 ES 未启�
 
 测试构成：
 - **mp-es-core 单元测试**（6 个）：Lambda 属性名解析、类型推导——不依赖 ES
-- **mp-es-sample 集成测试**（13 个）：CRUD 生命周期、批量读写、条件查询（eq/gt/like/match/between/or 嵌套/selectOne）、分页与越界、高亮、聚合、子聚合、search_after 深分页、Geo（geo_distance 过滤/距离排序/组合条件）、Nested（子文档条件/多条件 AND/往返还原/geo+nested 组合）、条件删除/条件更新/批量部分更新——需本地 ES 运行，测试内通过 `indices().refresh` 保证写入可见性
+- **mp-es-sample 集成测试**（16 个）：CRUD 生命周期、批量读写、条件查询（eq/gt/like/match/between/or 嵌套/selectOne）、分页与越界、高亮、聚合、子聚合、search_after 深分页、Geo（geo_distance 过滤/距离排序/组合条件）、Nested（子文档条件/多条件 AND/往返还原/geo+nested 组合）、条件删除/条件更新/批量部分更新、查询增强（multiMatch/boost 排序翻转/fuzzy 容错/prefix）——需本地 ES 运行，测试内通过 `indices().refresh` 保证写入可见性
