@@ -16,7 +16,43 @@
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>mybatis-plus-es</name>
-    <description>MyBatis-Plus 风格 API 操作 Elasticsearch 的适配层</description>
+    <description>MyBatis-Plus 风格 API 操作 Elasticsearch 的适配层：沿用 MP 的 Mapper / Wrapper 写法，底层直连 Elasticsearch 官方 Java API Client，不经过任何 MyBatis 执行机制</description>
+    <url>https://github.com/kennethfan/mybatis-plus-es</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>kennethfan</id>
+            <name>Kenneth Fan</name>
+            <url>https://github.com/kennethfan</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <url>https://github.com/kennethfan/mybatis-plus-es</url>
+        <connection>scm:git:https://github.com/kennethfan/mybatis-plus-es.git</connection>
+        <developerConnection>scm:git:git@github.com:kennethfan/mybatis-plus-es.git</developerConnection>
+    </scm>
+
+    <distributionManagement>
+        <repository>
+            <id>central</id>
+            <name>Maven Central</name>
+            <url>https://central.sonatype.com/api/v1/publisher</url>
+        </repository>
+        <snapshotRepository>
+            <id>central</id>
+            <name>Maven Central Snapshots</name>
+            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+        </snapshotRepository>
+    </distributionManagement>
 
     <modules>
         <module>mp-es-core</module>
@@ -48,4 +84,52 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <!-- 发布专用：-Prelease 激活（sources + javadoc + gpg 签名），普通构建与 CI 不受影响 -->
+    <profiles>
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

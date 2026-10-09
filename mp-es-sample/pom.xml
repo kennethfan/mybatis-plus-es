@@ -14,6 +14,11 @@
     <name>mp-es-sample</name>
     <description>mp-es-core 的示例应用：Product 实体 + 集成测试</description>
 
+    <!-- 示例应用不发布到 Maven 仓库（仅 core 发布） -->
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.github.kennethfan</groupId>
