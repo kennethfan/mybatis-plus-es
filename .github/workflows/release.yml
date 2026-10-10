@@ -24,6 +24,16 @@ jobs:
           java-version: "17"
           cache: maven
 
+      # 钉住 Maven 3.9.9：runner 预装的新版 Maven（Resolver 2.0）会把 install 重定向
+      # staging 的 metadata 命名为 local（maven-metadata-local.xml），插件 Pre Bundling
+      # 清理正则只匹配 maven-metadata-*-staging.xml，垃圾漏删导致 Portal 校验
+      # "Bundle has content that does NOT have a .pom file" 失败；3.9.x（Resolver 1.9）
+      # 无此问题（本地 3.9.9 验证干净）
+      - name: Set up Maven 3.9.9
+        run: |
+          curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz | tar xz -C /opt
+          echo "/opt/apache-maven-3.9.9/bin" >> "$GITHUB_PATH"
+
       - name: Resolve version from tag
         id: version
         run: |
