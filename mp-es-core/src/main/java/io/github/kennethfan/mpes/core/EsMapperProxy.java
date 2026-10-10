@@ -598,7 +598,7 @@ public class EsMapperProxy<T> implements InvocationHandler {
         Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
         Map<String, Aggregation> spec = new LinkedHashMap<>();
         for (EsAgg agg : aggs) {
-            spec.put(agg.getName(), toAggregation(agg));
+            spec.put(agg.getName(), toAggregation(agg, fieldResolver, ""));
         }
         try {
             var resp = client.search(s -> s
@@ -626,14 +626,26 @@ public class EsMapperProxy<T> implements InvocationHandler {
         }
     }
 
-    private Aggregation toAggregation(EsAgg agg) {
+    private Aggregation toAggregation(EsAgg agg, EsQueryTranslator.FieldResolver resolver, String prefix) {
         // top_hits 无属性概念，field 仅对字段类聚合解析
         String field = agg.getProperty() != null
-                ? metadata.fieldByProperty(agg.getProperty()).getEsFieldName()
+                ? prefix + resolver.apply(agg.getProperty()).getEsFieldName()
                 : null;
         Map<String, Aggregation> sub = new LinkedHashMap<>();
+        EsQueryTranslator.FieldResolver childResolver = resolver;
+        String childPrefix = prefix;
+        if (agg.getType() == EsAgg.Type.NESTED) {
+            // nested 聚合：子聚合进入子文档作用域，字段用子实体元数据 + path 前缀解析
+            FieldMetadata fm = resolver.apply(agg.getProperty());
+            if (!"nested".equals(fm.getEsType()) || fm.getNestedMetadata() == null) {
+                throw new EsOpsException("字段 " + fm.getEsFieldName()
+                        + " 不是 nested 类型（@EsNested），不能使用 nested 聚合");
+            }
+            childResolver = fm.getNestedMetadata()::fieldByProperty;
+            childPrefix = fm.getEsFieldName() + ".";
+        }
         for (EsAgg child : agg.getChildren()) {
-            sub.put(child.getName(), toAggregation(child));
+            sub.put(child.getName(), toAggregation(child, childResolver, childPrefix));
         }
         // 8.19 客户端：a.terms()/a.avg() 等返回 ContainerBuilder，子聚合挂在它上面
         return Aggregation.of(a -> {
@@ -684,10 +696,12 @@ public class EsMapperProxy<T> implements InvocationHandler {
                 case SUM -> a.sum(v -> v.field(field));
                 case STATS -> a.stats(v -> v.field(field));
                 case CARDINALITY -> a.cardinality(v -> v.field(field));
+                case NESTED -> a.nested(n -> n.path(field));
                 case TOP_HITS -> a.topHits(th -> {
                     th.size(agg.getTopSize());
                     for (EsAgg.TopSort sort : agg.getTopSorts()) {
-                        String sortField = metadata.fieldByProperty(sort.property()).getEsFieldName();
+                        String sortField = prefix
+                                + resolver.apply(sort.property()).getEsFieldName();
                         th.sort(so -> so.field(f -> f.field(sortField)
                                 .order(sort.asc() ? SortOrder.Asc : SortOrder.Desc)));
                     }

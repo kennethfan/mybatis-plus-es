@@ -422,6 +422,30 @@ class ProductMapperIntegrationTest {
     }
 
     @Test
+    void nestedAgg() {
+        seedThree();
+
+        // nested 桶：共 4 条 SKU 文档（1+1+2）；avg quantity = (60+80+5+10)/4 = 38.75
+        EsAggResult result = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.nested(Product::getSkus, EsAgg.avg(Sku::getQuantity).as("avgQty")));
+        EsBucket bucket = result.nested("skus");
+        assertNull(bucket.getKey());
+        assertEquals(4, bucket.getCount());
+        assertEquals(38.75, bucket.getAggs().value("avgQty"), 0.01);
+
+        // 外层条件过滤父文档（仅下架的 ID_3）：2 条 SKU，max quantity = 10
+        EsAggResult filtered = mapper.aggregate(new EsLambdaQueryWrapper<Product>()
+                        .eq(Product::getOnSale, false),
+                EsAgg.nested(Product::getSkus, EsAgg.max(Sku::getQuantity).as("maxQty")));
+        assertEquals(2, filtered.nested("skus").getCount());
+        assertEquals(10.0, filtered.nested("skus").getAggs().value("maxQty"), 0.01);
+
+        // 非 nested 字段直接拒绝
+        assertThrows(EsOpsException.class, () -> mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.nested(Product::getPrice)));
+    }
+
+    @Test
     void dateHistogramByMonth() {
         seedThree();
 

@@ -62,6 +62,18 @@ public class EsAggResult {
     }
 
     /**
+     * nested 聚合取单桶：key=null、count=nested 文档总数，
+     * 子聚合经 {@code bucket.getAggs().value(...)} 取；不存在或非 nested 抛异常。
+     */
+    public EsBucket nested(String name) {
+        Aggregate agg = require(name);
+        if (agg._kind() != Aggregate.Kind.Nested) {
+            throw new EsOpsException("聚合 " + name + " 不是 nested 类型: " + agg._kind());
+        }
+        return new EsBucket(null, agg.nested().docCount(), new EsAggResult(agg.nested().aggregations()));
+    }
+
+    /**
      * top_hits 取文档列表，source 反序列化为给定实体类型；不存在或非 top_hits 抛异常。
      * 顶层聚合与 terms 桶内子聚合（bucket.getAggs().hits(...)）均可用。
      */

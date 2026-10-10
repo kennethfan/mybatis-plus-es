@@ -21,7 +21,7 @@ public class EsAgg {
     private static final List<String> CALENDAR_INTERVALS =
             List.of("second", "minute", "hour", "day", "week", "month", "quarter", "year");
 
-    public enum Type { TERMS, AVG, MAX, MIN, SUM, STATS, CARDINALITY, DATE_HISTOGRAM, RANGE, TOP_HITS }
+    public enum Type { TERMS, AVG, MAX, MIN, SUM, STATS, CARDINALITY, DATE_HISTOGRAM, RANGE, TOP_HITS, NESTED }
 
     /** top_hits 的排序字段（property + 方向） */
     public record TopSort(String property, boolean asc) {}
@@ -105,6 +105,19 @@ public class EsAgg {
         }
         EsAgg agg = new EsAgg(Type.RANGE, LambdaUtils.propertyName(col));
         agg.ranges.addAll(Arrays.asList(ranges));
+        return agg;
+    }
+
+    /**
+     * nested 子文档聚合（仅 @EsNested 字段）：进入子文档作用域后计算子聚合。
+     * 子聚合的 lambda 用子实体类型（如 Sku::getQuantity），字段自动加 nested path 前缀；
+     * 结果经 {@link EsAggResult#nested(String)} 取单桶（docCount + 子聚合值）。
+     */
+    public static <T> EsAgg nested(SFunction<T, ?> col, EsAgg... children) {
+        EsAgg agg = new EsAgg(Type.NESTED, LambdaUtils.propertyName(col));
+        if (children != null && children.length > 0) {
+            agg.children.addAll(Arrays.asList(children));
+        }
         return agg;
     }
 
