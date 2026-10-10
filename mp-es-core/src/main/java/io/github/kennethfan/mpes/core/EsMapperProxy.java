@@ -12,6 +12,7 @@ import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.core.search.Highlight;
 import co.elastic.clients.elasticsearch.core.search.HighlightField;
 import co.elastic.clients.elasticsearch.core.search.Hit;
+import co.elastic.clients.elasticsearch.core.search.InnerHitsResult;
 import co.elastic.clients.elasticsearch.core.search.TotalHits;
 import co.elastic.clients.elasticsearch._types.Result;
 import co.elastic.clients.elasticsearch._types.SortOrder;
@@ -89,6 +90,8 @@ public class EsMapperProxy<T> implements InvocationHandler {
             case "selectHighlighted" -> selectHighlighted(
                     (EsLambdaQueryWrapper<?>) args[0], (EsHighlight<?>) args[1]);
             case "aggregate" -> aggregate((EsLambdaQueryWrapper<?>) args[0], (EsAgg[]) args[1]);
+            case "selectListWithNestedHits" -> selectListWithNestedHits(
+                    (EsLambdaQueryWrapper<?>) args[0], (Class<?>) args[1]);
             case "toString" -> mapperInterface.getSimpleName() + "@" + metadata.getIndexName();
             case "hashCode" -> System.identityHashCode(proxy);
             case "equals" -> proxy == args[0];
@@ -440,6 +443,44 @@ public class EsMapperProxy<T> implements InvocationHandler {
             throw new EsOpsException("命中 " + totalHits + " 条，超过单次上限 " + MAX_LIST_SIZE
                     + "（索引 " + metadata.getIndexName() + "）。请加 .limit(n)（上限 "
                     + EsLambdaQueryWrapper.MAX_RESULT_WINDOW + "）或改用 selectAfter 深分页");
+        }
+    }
+
+    /** nested 检索 + inner_hits：命中子文档按 inner_hits 命名（= nested path，含前缀）取回并反序列化 */
+    @SuppressWarnings("unchecked")
+    private <E, C> List<NestedHit<E, C>> selectListWithNestedHits(EsLambdaQueryWrapper<?> wrapper,
+                                                                  Class<C> childType) {
+        List<EsLambdaQueryWrapper.NestedInnerHits> innerHitLeaves = wrapper.getInnerHitsRequests();
+        if (innerHitLeaves.size() != 1) {
+            throw new EsOpsException("selectListWithNestedHits 要求 wrapper 恰有一个带 innerHitsSize 的 "
+                    + "nested() 条件，实际 " + innerHitLeaves.size() + " 个");
+        }
+        String path = metadata.fieldByProperty(innerHitLeaves.get(0).property()).getEsFieldName();
+        Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
+        List<co.elastic.clients.elasticsearch._types.SortOptions> sorts =
+                EsQueryTranslator.toSorts(wrapper, fieldResolver);
+        Integer limit = wrapper.getLimit();
+        int size = limit != null ? limit : MAX_LIST_SIZE;
+        try {
+            var resp = client.search(s -> s
+                            .index(metadata.getIndexName())
+                            .query(query)
+                            .sort(sorts)
+                            .size(size)
+                            .trackTotalHits(t -> t.enabled(true)),
+                    (Class<Object>) metadata.getEntityClass());
+            List<NestedHit<E, C>> result = new ArrayList<>();
+            for (Hit<Object> hit : resp.hits().hits()) {
+                InnerHitsResult inner = hit.innerHits().get(path);
+                List<C> children = inner == null ? List.of()
+                        : inner.hits().hits().stream()
+                                .map(h -> (C) h.source().to(childType))
+                                .toList();
+                result.add(new NestedHit<>((E) hit.source(), children));
+            }
+            return result;
+        } catch (IOException e) {
+            throw new EsOpsException("selectListWithNestedHits 失败: " + metadata.getIndexName(), e);
         }
     }
 

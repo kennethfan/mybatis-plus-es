@@ -211,9 +211,14 @@ public final class EsQueryTranslator {
         }
         String path = prefix + fm.getEsFieldName();
         Query inner = toQuery(nested.inner(), fm.getNestedMetadata()::fieldByProperty, path + ".");
-        return Query.of(q -> q.nested(n -> n
-                .path(path)
-                .query(inner)));
+        return Query.of(q -> q.nested(n -> {
+            n.path(path).query(inner);
+            if (nested.innerHitsSize() != null) {
+                // inner_hits 显式命名为 nested path（含前缀），供解析端按名取回
+                n.innerHits(ih -> ih.name(path).size(nested.innerHitsSize()));
+            }
+            return n;
+        }));
     }
 
     private static void rejectText(boolean isText, String field, String suggestion) {

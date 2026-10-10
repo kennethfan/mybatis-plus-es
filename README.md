@@ -211,6 +211,7 @@ List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
 - **collapse 字段去重**：`wrapper.collapse(col)` 仅 selectList 生效（ES 限制 keyword/数值字段），每组保留排序最优 1 条；selectCount 不受影响（ES total 为折叠前命中数）
 - **nested 排序**：`wrapper.orderByNested(nestedCol, Child.class, Child::getField, asc)`，可带子过滤重载（仅过滤命中的子文档参与排序）；字段须为 @EsNested
 - **nested 聚合**：`EsAgg.nested(nestedCol, EsAgg.avg(Child::getField)...)`——子聚合 lambda 用子实体类型，字段自动加 path 前缀；结果经 `EsAggResult.nested(name)` 取单桶（count=nested 文档数，子聚合经 bucket.getAggs() 取）
+- **nested inner_hits**：`wrapper.nested(col, Child.class, size, w -> ...)`（size = 每父文档最多返回的命中子文档数）+ `mapper.selectListWithNestedHits(wrapper, Child.class)` → `NestedHit<T,C>`（entity 父实体 + hits 命中子文档）；wrapper 内最多一个带 innerHitsSize 的 nested 条件
 - `selectOne` 命中多条直接抛异常（不静默取首条）
 - `deleteBatchIds` / `deleteByQuery` 使用 `conflicts=proceed`：删除目标刚被更新时跳过该条而非整体 409 失败
 - 主键（@TableId）同时作为 ES 文档 `_id` 与 `_source` 字段

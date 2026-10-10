@@ -43,8 +43,8 @@ public class EsLambdaQueryWrapper<T> {
     /** multi_match 条件：跨多字段分词检索，boost 与 type/operator 等 options 均可空 */
     record MultiMatchLeaf(List<String> properties, Object value, Float boost, EsMultiMatch options) {}
 
-    /** nested 子文档条件：属性名 + 作用于子实体类型的子 Wrapper */
-    record NestedLeaf(String property, EsLambdaQueryWrapper<?> inner) {}
+    /** nested 子文档条件：属性名 + 作用于子实体类型的子 Wrapper + innerHits 返回条数（可空 = 不取命中子文档） */
+    record NestedLeaf(String property, EsLambdaQueryWrapper<?> inner, Integer innerHitsSize) {}
 
     /** script 过滤条件：painless source + 参数（filter context，不打分） */
     record ScriptLeaf(String source, Map<String, Object> params) {}
@@ -203,7 +203,24 @@ public class EsLambdaQueryWrapper<T> {
                                               Consumer<EsLambdaQueryWrapper<C>> consumer) {
         EsLambdaQueryWrapper<C> sub = new EsLambdaQueryWrapper<>();
         consumer.accept(sub);
-        nodes.add(new Node(pendingOr, new NestedLeaf(LambdaUtils.propertyName(col), sub)));
+        nodes.add(new Node(pendingOr, new NestedLeaf(LambdaUtils.propertyName(col), sub, null)));
+        pendingOr = false;
+        return this;
+    }
+
+    /**
+     * nested 子文档条件 + inner_hits（返回每个父文档命中的子文档，最多 innerHitsSize 条）。
+     * 配合 {@code mapper.selectListWithNestedHits(wrapper, Child.class)} 使用；
+     * wrapper 内最多一个带 innerHitsSize 的 nested 条件。
+     */
+    public <C> EsLambdaQueryWrapper<T> nested(SFunction<T, ?> col, Class<C> childType, int innerHitsSize,
+                                              Consumer<EsLambdaQueryWrapper<C>> consumer) {
+        if (innerHitsSize <= 0) {
+            throw new EsOpsException("innerHitsSize 必须为正整数，实际 " + innerHitsSize);
+        }
+        EsLambdaQueryWrapper<C> sub = new EsLambdaQueryWrapper<>();
+        consumer.accept(sub);
+        nodes.add(new Node(pendingOr, new NestedLeaf(LambdaUtils.propertyName(col), sub, innerHitsSize)));
         pendingOr = false;
         return this;
     }
@@ -320,6 +337,21 @@ public class EsLambdaQueryWrapper<T> {
         nestedSorts.add(new NestedSortSpec(LambdaUtils.propertyName(nestedCol),
                 LambdaUtils.propertyName(sortCol), asc, sub));
         return this;
+    }
+
+    /** 供执行层使用：wrapper 内带 innerHitsSize 的 nested 条件（属性名 + 返回条数） */
+    public record NestedInnerHits(String property, Integer size) {}
+
+    /** inner_hits 配置：selectListWithNestedHits 校验「恰有一个」的依据 */
+    public List<NestedInnerHits> getInnerHitsRequests() {
+        return nodes.stream()
+                .map(n -> n.content())
+                .filter(c -> c instanceof NestedLeaf nl && nl.innerHitsSize() != null)
+                .map(c -> {
+                    NestedLeaf nl = (NestedLeaf) c;
+                    return new NestedInnerHits(nl.property(), nl.innerHitsSize());
+                })
+                .toList();
     }
 
     public boolean isEmpty() {

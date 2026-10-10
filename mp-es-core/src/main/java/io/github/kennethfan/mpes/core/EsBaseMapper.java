@@ -72,6 +72,12 @@ public interface EsBaseMapper<T> {
     /** 高亮检索：返回实体 + 高亮片段（highlight 中字段需与查询条件配合使用） */
     List<EsHit<T>> selectHighlighted(EsLambdaQueryWrapper<T> wrapper, EsHighlight<T> highlight);
 
-    /** 聚合查询：terms / avg / max / min / sum / stats / cardinality（ES 查询不返回文档，size=0） */
+    /** 聚合查询：terms / avg / max / min / sum / stats / cardinality / date_histogram / range / nested / top_hits（ES 查询不返回文档，size=0） */
     EsAggResult aggregate(EsLambdaQueryWrapper<T> wrapper, EsAgg... aggs);
+
+    /**
+     * nested 检索 + inner_hits：返回父实体与命中的子文档。
+     * 要求 wrapper 恰有一个带 innerHitsSize 的 nested() 条件（如 nested(Product::getSkus, Sku.class, 3, w -> ...)）。
+     */
+    <C> List<NestedHit<T, C>> selectListWithNestedHits(EsLambdaQueryWrapper<T> wrapper, Class<C> childType);
 }

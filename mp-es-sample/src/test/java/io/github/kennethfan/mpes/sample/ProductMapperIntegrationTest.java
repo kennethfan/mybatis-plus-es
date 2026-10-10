@@ -446,6 +446,32 @@ class ProductMapperIntegrationTest {
     }
 
     @Test
+    void nestedInnerHits() {
+        seedThree();
+
+        // SKU-C3 命中 → 父 ID_3 + 命中子文档 SKU 实体
+        var hits = mapper.selectListWithNestedHits(new EsLambdaQueryWrapper<Product>()
+                .nested(Product::getSkus, Sku.class, 3, w -> w.eq(Sku::getSkuCode, "SKU-C3")), Sku.class);
+        assertEquals(1, hits.size());
+        assertEquals(ID_3, hits.get(0).entity().getId());
+        assertEquals(1, hits.get(0).hits().size());
+        assertEquals("SKU-C3", hits.get(0).hits().get(0).getSkuCode());
+        assertEquals(5, hits.get(0).hits().get(0).getQuantity());
+
+        // innerHitsSize 限制生效：命中 4K+2K 两个子文档但 size=1 → 每父文档仅 1 条命中
+        var limited = mapper.selectListWithNestedHits(new EsLambdaQueryWrapper<Product>()
+                .nested(Product::getSkus, Sku.class, 1, w -> w.eq(Sku::getSkuCode, "SKU-C3")
+                        .or().eq(Sku::getSkuCode, "SKU-D4")), Sku.class);
+        assertEquals(1, limited.size());
+        assertEquals(1, limited.get(0).hits().size());
+
+        // 无 innerHitsSize 的 nested 条件 → 拒绝
+        assertThrows(EsOpsException.class, () -> mapper.selectListWithNestedHits(
+                new EsLambdaQueryWrapper<Product>().nested(Product::getSkus, Sku.class,
+                        w -> w.eq(Sku::getSkuCode, "SKU-A1")), Sku.class));
+    }
+
+    @Test
     void dateHistogramByMonth() {
         seedThree();
 
