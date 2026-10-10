@@ -16,6 +16,7 @@ import co.elastic.clients.elasticsearch.core.search.TotalHits;
 import co.elastic.clients.elasticsearch._types.Result;
 import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.json.JsonData;
+import co.elastic.clients.util.NamedValue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.kennethfan.mpes.agg.EsAgg;
 import io.github.kennethfan.mpes.agg.EsAggRange;
@@ -605,6 +606,19 @@ public class EsMapperProxy<T> implements InvocationHandler {
         }
     }
 
+    /** terms orderBy 的 metric 必须是 _count/_key 或已挂载的子聚合名，防 ES 静默失败 */
+    private void validateTermsOrder(EsAgg agg) {
+        String metric = agg.getOrderMetric();
+        if ("_count".equals(metric) || "_key".equals(metric)) {
+            return;
+        }
+        boolean exists = agg.getChildren().stream().anyMatch(c -> metric.equals(c.getName()));
+        if (!exists) {
+            throw new EsOpsException("terms orderBy 子聚合不存在: " + metric
+                    + "，已挂载: " + agg.getChildren().stream().map(EsAgg::getName).toList());
+        }
+    }
+
     private Aggregation toAggregation(EsAgg agg) {
         // top_hits 无属性概念，field 仅对字段类聚合解析
         String field = agg.getProperty() != null
@@ -619,6 +633,12 @@ public class EsMapperProxy<T> implements InvocationHandler {
             Aggregation.Builder.ContainerBuilder c = switch (agg.getType()) {
                 case TERMS -> a.terms(t -> {
                     t.field(field).size(agg.getSize() != null ? agg.getSize() : 100);
+                    if (agg.getOrderMetric() != null) {
+                        validateTermsOrder(agg);
+                        t.order(NamedValue.of(agg.getOrderMetric(),
+                                Boolean.TRUE.equals(agg.getOrderDesc())
+                                        ? SortOrder.Desc : SortOrder.Asc));
+                    }
                     return t;
                 });
                 case DATE_HISTOGRAM -> a.dateHistogram(dh -> {

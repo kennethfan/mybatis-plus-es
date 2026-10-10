@@ -397,6 +397,31 @@ class ProductMapperIntegrationTest {
         assertThrows(IllegalArgumentException.class, () -> EsAgg.topHits(0));
     }
 
+    @Test
+    void termsOrderBySubAgg() {
+        seedThree();
+
+        // 按 avgPrice 降序：下架组(2899) 在前 → 桶序 [0, 1]
+        var buckets = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getOnSale)
+                        .subAgg(EsAgg.avg(Product::getPrice).as("avgPrice"))
+                        .orderBy("avgPrice", true)).buckets("onSale");
+        assertEquals(List.of(0L, 1L), buckets.stream().map(b -> (Long) b.getKey()).toList());
+        assertEquals(2899.0, buckets.get(0).getAggs().value("avgPrice"), 0.01);
+
+        // 按 _count 降序：在售组(2 条) 在前 → 桶序 [1, 0]
+        var byCount = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getOnSale).orderBy("_count", true)).buckets("onSale");
+        assertEquals(List.of(1L, 0L), byCount.stream().map(b -> (Long) b.getKey()).toList());
+
+        // 引用不存在的子聚合 → 执行前直接报错（防 ES 静默失败）
+        assertThrows(EsOpsException.class, () -> mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getOnSale).orderBy("nope", true)));
+
+        // 非 terms 聚合调用 orderBy 直接拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAgg.avg(Product::getPrice).orderBy("_count", true));
+    }
+
     // ---------- 嵌套子聚合 ----------
 
     @Test

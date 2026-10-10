@@ -37,6 +37,8 @@ public class EsAgg {
     private String dateInterval;
     private String dateFormat;
     private Integer dateMinDocCount;
+    private String orderMetric;
+    private Boolean orderDesc;
 
     private EsAgg(Type type, String property) {
         this.type = type;
@@ -189,6 +191,22 @@ public class EsAgg {
         return this;
     }
 
+    /**
+     * terms 分桶排序（仅 terms 可用）：metric 支持 "_count"（文档数）/ "_key"（桶键）/
+     * 子聚合名（如 "avgPrice"，必须已通过 {@link #subAgg(EsAgg...)} 挂载，否则执行时报错）。
+     */
+    public EsAgg orderBy(String metric, boolean desc) {
+        if (type != Type.TERMS) {
+            throw new IllegalArgumentException("orderBy 仅适用于 terms 聚合，当前类型: " + type);
+        }
+        if (metric == null || metric.isBlank()) {
+            throw new IllegalArgumentException("orderBy 的 metric 不能为空");
+        }
+        this.orderMetric = metric;
+        this.orderDesc = desc;
+        return this;
+    }
+
     public Type getType() {
         return type;
     }
@@ -220,6 +238,14 @@ public class EsAgg {
 
     public List<TopSort> getTopSorts() {
         return topSorts;
+    }
+
+    public String getOrderMetric() {
+        return orderMetric;
+    }
+
+    public Boolean getOrderDesc() {
+        return orderDesc;
     }
 
     public String getProperty() {
