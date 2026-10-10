@@ -258,6 +258,29 @@ public final class EsQueryTranslator {
                     .location(l -> l.latlon(ll -> ll.lat(origin.getLat()).lon(origin.getLon())))
                     .order(order))));
         }
+        for (EsLambdaQueryWrapper.NestedSortSpec s : wrapper.getNestedSorts()) {
+            FieldMetadata fm = resolver.apply(s.property());
+            if (!"nested".equals(fm.getEsType()) || fm.getNestedMetadata() == null) {
+                throw new EsOpsException("字段 " + fm.getEsFieldName()
+                        + " 不是 nested 类型（@EsNested），不能使用 orderByNested");
+            }
+            String path = fm.getEsFieldName();
+            String sortField = path + "."
+                    + fm.getNestedMetadata().fieldByProperty(s.sortProperty()).getEsFieldName();
+            SortOrder order = s.asc() ? SortOrder.Asc : SortOrder.Desc;
+            EsLambdaQueryWrapper<?> filter = s.filter();
+            result.add(SortOptions.of(so -> so.field(f -> {
+                f.field(sortField).order(order)
+                        .nested(n -> {
+                            n.path(path);
+                            if (filter != null && !filter.isEmpty()) {
+                                n.filter(toQuery(filter, fm.getNestedMetadata()::fieldByProperty, path + "."));
+                            }
+                            return n;
+                        });
+                return f;
+            })));
+        }
         return result;
     }
 }

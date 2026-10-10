@@ -398,6 +398,29 @@ class ProductMapperIntegrationTest {
         }
     }
 
+    // ---------- nested 进阶（十期） ----------
+
+    @Test
+    void nestedSort() {
+        seedThree();
+
+        // 无过滤：按 SKU 数量降序 → ID_2(80) → ID_1(60) → ID_3(最大 10)
+        var byQty = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .orderByNested(Product::getSkus, Sku.class, Sku::getQuantity, false));
+        assertEquals(List.of(ID_2, ID_1, ID_3), byQty.stream().map(Product::getId).toList());
+
+        // 带子过滤：仅 spec=4K 的 SKU 参与排序（只有 ID_3 有 4K SKU）→ ID_3 在前，其余 missing 后置
+        var filtered = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .orderByNested(Product::getSkus, Sku.class, Sku::getQuantity, false,
+                        w -> w.eq(Sku::getSpec, "4K")));
+        assertEquals(ID_3, filtered.get(0).getId());
+        assertEquals(3, filtered.size());
+
+        // 非 nested 字段直接拒绝
+        assertThrows(EsOpsException.class, () -> mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .orderByNested(Product::getPrice, Product.class, Product::getPrice, true)));
+    }
+
     @Test
     void dateHistogramByMonth() {
         seedThree();

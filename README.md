@@ -209,6 +209,7 @@ List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
 - **multi_match type/operator 可配**：`multiMatch(EsMultiMatch.type(MatchType.MOST_FIELDS).operatorAnd(), value, cols...)`，五型（BEST_FIELDS/MOST_FIELDS/CROSS_FIELDS/PHRASE/PHRASE_PREFIX）+ AND/OR + minimumShouldMatch；PHRASE 系仅 text 字段；原两个重载（默认 best_fields）行为不变
 - **script 过滤**：`wrapper.script("doc['stock'].value > params.min", Map.of("min", 50))`（params 可空），painless filter context 不打分，可与普通条件组合；source 为用户自写脚本，注入风险自担
 - **collapse 字段去重**：`wrapper.collapse(col)` 仅 selectList 生效（ES 限制 keyword/数值字段），每组保留排序最优 1 条；selectCount 不受影响（ES total 为折叠前命中数）
+- **nested 排序**：`wrapper.orderByNested(nestedCol, Child.class, Child::getField, asc)`，可带子过滤重载（仅过滤命中的子文档参与排序）；字段须为 @EsNested
 - `selectOne` 命中多条直接抛异常（不静默取首条）
 - `deleteBatchIds` / `deleteByQuery` 使用 `conflicts=proceed`：删除目标刚被更新时跳过该条而非整体 409 失败
 - 主键（@TableId）同时作为 ES 文档 `_id` 与 `_source` 字段

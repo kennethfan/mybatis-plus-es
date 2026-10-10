@@ -54,6 +54,9 @@ public class EsLambdaQueryWrapper<T> {
     /** geo_distance 排序：以 origin 为基准按距离升/降序 */
     record GeoDistanceSortSpec(String property, GeoPoint origin, boolean asc) {}
 
+    /** nested 排序：按子文档字段排序父文档（可带子过滤） */
+    record NestedSortSpec(String property, String sortProperty, boolean asc, EsLambdaQueryWrapper<?> filter) {}
+
     /** 条件节点：orToPrevious 表示与前一节点以 OR 连接；content 为 Leaf 或嵌套 Wrapper（分组） */
     record Node(boolean orToPrevious, Object content) {}
 
@@ -65,6 +68,9 @@ public class EsLambdaQueryWrapper<T> {
 
     @Getter
     private final List<GeoDistanceSortSpec> geoSorts = new ArrayList<>();
+
+    @Getter
+    private final List<NestedSortSpec> nestedSorts = new ArrayList<>();
 
     /** 返回条数上限（仅 selectList / selectHighlighted 生效），null 表示未显式指定 */
     @Getter
@@ -290,6 +296,29 @@ public class EsLambdaQueryWrapper<T> {
     /** 按到 origin 的距离排序，仅用于 geo_point 字段 */
     public EsLambdaQueryWrapper<T> orderByGeoDistance(SFunction<T, ?> col, GeoPoint origin, boolean asc) {
         geoSorts.add(new GeoDistanceSortSpec(LambdaUtils.propertyName(col), origin, asc));
+        return this;
+    }
+
+    /** nested 子文档字段排序（仅用于 @EsNested 字段），无子过滤 */
+    public <C> EsLambdaQueryWrapper<T> orderByNested(SFunction<T, ?> nestedCol, Class<C> childType,
+                                                     SFunction<C, ?> sortCol, boolean asc) {
+        return orderByNested(nestedCol, childType, sortCol, asc, null);
+    }
+
+    /**
+     * nested 子文档字段排序（仅用于 @EsNested 字段），可带子过滤条件：
+     * 仅 filter 命中的子文档参与排序（如「spec=4K 的 SKU 按数量降序」）。
+     */
+    public <C> EsLambdaQueryWrapper<T> orderByNested(SFunction<T, ?> nestedCol, Class<C> childType,
+                                                     SFunction<C, ?> sortCol, boolean asc,
+                                                     Consumer<EsLambdaQueryWrapper<C>> filter) {
+        EsLambdaQueryWrapper<C> sub = null;
+        if (filter != null) {
+            sub = new EsLambdaQueryWrapper<>();
+            filter.accept(sub);
+        }
+        nestedSorts.add(new NestedSortSpec(LambdaUtils.propertyName(nestedCol),
+                LambdaUtils.propertyName(sortCol), asc, sub));
         return this;
     }
 
