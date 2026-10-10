@@ -296,7 +296,7 @@ mvn -B -ntp javadoc:javadoc -pl mp-es-core   # Javadoc 可生成（质量门槛�
 | 九期 | 查询增强续：multi_match type/operator 可配（EsMultiMatch）、script 过滤、collapse 去重 |
 | 十期 | nested 进阶：nested 排序（含子过滤）、nested 聚合、inner_hits（selectListWithNestedHits） |
 | 十一期 | 索引运维：EsIndexOps——exists/drop/createNew/reindex 基础件、aliasAdd/aliasSwap/aliasIndexes 原子操作、rebuild 一键平滑重建（存量迁移）、索引模板（putTemplate/templateExists/dropTemplate） |
-| 发布落地 | v0.1.1 已发布至 Maven Central（io.github.kennethfan:mp-es-core:0.1.1，tag v0.1.1 触发 CI 全自动发布 + 自动建 GitHub Release） |
+| 发布落地 | v0.2.0 已发布至 Maven Central（io.github.kennethfan:mp-es-core:0.2.0，tag 触发 CI 全自动发布 + 自动建 GitHub Release） |
 
 **候选方向**（按需排期，欢迎提 issue 讨论）
 

@@ -180,7 +180,7 @@ P["quick-start"] = ("快速开始", """
 """ + code('''<dependency>
     <groupId>io.github.kennethfan</groupId>
     <artifactId>mp-es-core</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.2.0</version>
 </dependency>''') + """
 <div class="warn"><b>⚠️</b> <code>mybatis-plus-annotation</code> 将 <code>org.mybatis:mybatis</code> 声明为 optional，
 但其注解默认值引用了 <code>JdbcType</code>——运行时解析注解必须能加载该类。mp-es-core 已显式引入 mybatis 3.5.19，
@@ -744,7 +744,7 @@ P["roadmap"] = ("Roadmap", """
   <tr><td>九期</td><td>查询增强续：multi_match type/operator 可配（EsMultiMatch）、script 过滤、collapse 去重</td></tr>
   <tr><td>十期</td><td>nested 进阶：nested 排序（含子过滤）、nested 聚合、inner_hits（selectListWithNestedHits）</td></tr>
   <tr><td>十一期</td><td>索引运维：EsIndexOps——exists/drop/createNew/reindex 基础件、alias 原子操作、rebuild 一键平滑重建（存量迁移）、索引模板</td></tr>
-  <tr><td>发布落地</td><td>Maven Central v0.1.1（tag 触发 CI 全自动发布 + 自动建 GitHub Release）</td></tr>
+  <tr><td>发布落地</td><td>Maven Central v0.2.0（tag 触发 CI 全自动发布 + 自动建 GitHub Release）</td></tr>
 </table>
 
 <h2>候选方向</h2>
