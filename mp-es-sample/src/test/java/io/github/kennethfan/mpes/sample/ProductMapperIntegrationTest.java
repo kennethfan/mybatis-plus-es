@@ -295,6 +295,24 @@ class ProductMapperIntegrationTest {
         assertEquals(3.0, result.value("productName"), 0.001);
     }
 
+    @Test
+    void termsAggSize() {
+        seedThree();
+
+        // productName 有 3 个不同值：不设 size 时默认 100 → 全量 3 桶
+        assertEquals(3, mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getProductName)).buckets("productName").size());
+
+        // size(2) → 只返回前 2 桶（高基数字段可显式控桶数）
+        assertEquals(2, mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getProductName).size(2)).buckets("productName").size());
+
+        // size 仅 terms 可用，其他类型直接拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAgg.avg(Product::getPrice).size(2));
+        // 非正数拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAgg.terms(Product::getProductName).size(0));
+    }
+
     // ---------- 嵌套子聚合 ----------
 
     @Test

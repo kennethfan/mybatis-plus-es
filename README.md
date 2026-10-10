@@ -201,6 +201,7 @@ List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
 - **wrapper 可传 null**：`selectCount(null)` / `selectPage(page, null)` 即全量语义（match_all）
 - 分页为 `from+size`，超出 10000 抛异常；**search_after** 无窗口限制（每批上限 10000，强制追加主键字段兜底排序保证全序，`_id` 禁止 fielddata 排序故用 `_source` 主键）
 - **limit(n) 控制返回条数**：`wrapper.limit(n)` 对 selectList / selectHighlighted 生效（上限 10000，超出提示改用 search_after）；未设置时默认取 1000 条，且**命中数超过 1000 直接报错**（不做静默截断，报错信息含总命中数）
+- **terms 聚合桶数可配**：`EsAgg.terms(col).size(n)` 显式指定分桶返回条数（仅 terms 可用，默认 100）；高基数字段聚合被截桶时调大即可
 - `selectOne` 命中多条直接抛异常（不静默取首条）
 - `deleteBatchIds` / `deleteByQuery` 使用 `conflicts=proceed`：删除目标刚被更新时跳过该条而非整体 409 失败
 - 主键（@TableId）同时作为 ES 文档 `_id` 与 `_source` 字段

@@ -612,7 +612,7 @@ public class EsMapperProxy<T> implements InvocationHandler {
         return Aggregation.of(a -> {
             Aggregation.Builder.ContainerBuilder c = switch (agg.getType()) {
                 case TERMS -> a.terms(t -> {
-                    t.field(field).size(100);
+                    t.field(field).size(agg.getSize() != null ? agg.getSize() : 100);
                     return t;
                 });
                 case AVG -> a.avg(v -> v.field(field));

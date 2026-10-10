@@ -21,6 +21,7 @@ public class EsAgg {
     private final String property;
     private final List<EsAgg> children = new ArrayList<>();
     private String name;
+    private Integer size;
 
     private EsAgg(Type type, String property) {
         this.type = type;
@@ -69,6 +70,21 @@ public class EsAgg {
     }
 
     /**
+     * terms 分桶返回条数（对应 ES terms 聚合 size，默认 100）。
+     * 仅 TERMS 类型聚合可调用；高基数字段需要更多桶时显式调大。
+     */
+    public EsAgg size(int size) {
+        if (type != Type.TERMS) {
+            throw new IllegalArgumentException("size 仅适用于 terms 聚合，当前类型: " + type);
+        }
+        if (size <= 0) {
+            throw new IllegalArgumentException("size 必须为正整数，实际 " + size);
+        }
+        this.size = size;
+        return this;
+    }
+
+    /**
      * 挂载子聚合（仅 terms 类分桶聚合有意义；支持任意深度链式嵌套）。
      * 子聚合名在每个桶内独立命名，与兄弟层级无冲突。
      */
@@ -82,6 +98,11 @@ public class EsAgg {
 
     public Type getType() {
         return type;
+    }
+
+    /** terms 分桶上限（未设置时由执行侧用默认 100） */
+    public Integer getSize() {
+        return size;
     }
 
     public String getProperty() {
