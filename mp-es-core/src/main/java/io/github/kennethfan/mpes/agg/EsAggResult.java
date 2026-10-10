@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 聚合结果：按聚合名取值。terms 类取 {@link #buckets(String)}，
+ * 聚合结果：按聚合名取值。分桶类（terms/dateHistogram）取 {@link #buckets(String)}，
  * 单值类（avg/max/min/sum/cardinality）取 {@link #value(String)}，stats 取 {@link #stats(String)}。
  */
 public class EsAggResult {
@@ -18,7 +18,7 @@ public class EsAggResult {
         this.aggregates = Map.copyOf(aggregates);
     }
 
-    /** terms 分组桶；不存在或非 terms 类聚合抛异常 */
+    /** 分桶聚合（terms / dateHistogram）取桶；不存在或其他类型抛异常 */
     public List<EsBucket> buckets(String name) {
         Aggregate agg = require(name);
         return switch (agg._kind()) {
@@ -28,7 +28,9 @@ public class EsAggResult {
                     .map(b -> new EsBucket(b.key(), b.docCount(), new EsAggResult(b.aggregations()))).toList();
             case Dterms -> agg.dterms().buckets().array().stream()
                     .map(b -> new EsBucket(b.key(), b.docCount(), new EsAggResult(b.aggregations()))).toList();
-            default -> throw new EsOpsException("聚合 " + name + " 不是 terms 类型: " + agg._kind());
+            case DateHistogram -> agg.dateHistogram().buckets().array().stream()
+                    .map(b -> new EsBucket(b.key(), b.docCount(), new EsAggResult(b.aggregations()))).toList();
+            default -> throw new EsOpsException("聚合 " + name + " 不是分桶类型: " + agg._kind());
         };
     }
 

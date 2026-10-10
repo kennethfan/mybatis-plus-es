@@ -3,6 +3,7 @@ package io.github.kennethfan.mpes.core;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.FieldValue;
 import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
+import co.elastic.clients.elasticsearch._types.aggregations.CalendarInterval;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
@@ -614,6 +615,18 @@ public class EsMapperProxy<T> implements InvocationHandler {
                 case TERMS -> a.terms(t -> {
                     t.field(field).size(agg.getSize() != null ? agg.getSize() : 100);
                     return t;
+                });
+                case DATE_HISTOGRAM -> a.dateHistogram(dh -> {
+                    dh.field(field).calendarInterval(CalendarInterval.valueOf(
+                            Character.toUpperCase(agg.getDateInterval().charAt(0))
+                                    + agg.getDateInterval().substring(1)));
+                    if (agg.getDateFormat() != null) {
+                        dh.format(agg.getDateFormat());
+                    }
+                    if (agg.getDateMinDocCount() != null) {
+                        dh.minDocCount(agg.getDateMinDocCount());
+                    }
+                    return dh;
                 });
                 case AVG -> a.avg(v -> v.field(field));
                 case MAX -> a.max(v -> v.field(field));

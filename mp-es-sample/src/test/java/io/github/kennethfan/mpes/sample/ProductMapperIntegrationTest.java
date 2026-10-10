@@ -313,6 +313,34 @@ class ProductMapperIntegrationTest {
         assertThrows(IllegalArgumentException.class, () -> EsAgg.terms(Product::getProductName).size(0));
     }
 
+    @Test
+    void dateHistogramByMonth() {
+        seedThree();
+
+        // 上线日期跨 2026-01/03/06 三个月：month 分桶默认 minDocCount=0，
+        // 数据区间（1 月~6 月）内空月份也返回 → 6 桶，key 为 epoch 毫秒且升序
+        var buckets = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.dateHistogram(Product::getLaunchDate, "month")).buckets("launchDate");
+        assertEquals(6, buckets.size());
+        for (int i = 1; i < buckets.size(); i++) {
+            assertTrue((Long) buckets.get(i).getKey() > (Long) buckets.get(i - 1).getKey());
+        }
+        // 6 桶中恰 3 个非空，每桶 1 条
+        assertEquals(3, buckets.stream().filter(b -> b.getCount() > 0).count());
+        assertTrue(buckets.stream().allMatch(b -> b.getCount() <= 1));
+
+        // minDocCount(1) 剔除空桶 → 3 桶，每月 1 条
+        var nonEmpty = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.dateHistogram(Product::getLaunchDate, "month").minDocCount(1))
+                .buckets("launchDate");
+        assertEquals(3, nonEmpty.size());
+        assertTrue(nonEmpty.stream().allMatch(b -> b.getCount() == 1));
+
+        // 非法 interval 直接拒绝
+        assertThrows(IllegalArgumentException.class,
+                () -> EsAgg.dateHistogram(Product::getLaunchDate, "fortnight"));
+    }
+
     // ---------- 嵌套子聚合 ----------
 
     @Test
