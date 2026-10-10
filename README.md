@@ -207,6 +207,7 @@ List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
 - **top_hits 桶内/顶层取文档**：`EsAgg.topHits(size, cols...)`（降序）/ `topHitsAsc(...)`（升序），默认聚合名 topHits，多个时 `.as()` 区分；结果经 `EsAggResult.hits(name, Entity.class)` 反序列化为实体，terms 桶内经 `bucket.getAggs().hits(...)` 取
 - **terms 分桶排序**：`EsAgg.terms(col).orderBy(metric, desc)`，metric 支持 `_count` / `_key` / 子聚合名（须已 subAgg 挂载，否则执行前报错）
 - **multi_match type/operator 可配**：`multiMatch(EsMultiMatch.type(MatchType.MOST_FIELDS).operatorAnd(), value, cols...)`，五型（BEST_FIELDS/MOST_FIELDS/CROSS_FIELDS/PHRASE/PHRASE_PREFIX）+ AND/OR + minimumShouldMatch；PHRASE 系仅 text 字段；原两个重载（默认 best_fields）行为不变
+- **script 过滤**：`wrapper.script("doc['stock'].value > params.min", Map.of("min", 50))`（params 可空），painless filter context 不打分，可与普通条件组合；source 为用户自写脚本，注入风险自担
 - `selectOne` 命中多条直接抛异常（不静默取首条）
 - `deleteBatchIds` / `deleteByQuery` 使用 `conflicts=proceed`：删除目标刚被更新时跳过该条而非整体 409 失败
 - 主键（@TableId）同时作为 ES 文档 `_id` 与 `_source` 字段

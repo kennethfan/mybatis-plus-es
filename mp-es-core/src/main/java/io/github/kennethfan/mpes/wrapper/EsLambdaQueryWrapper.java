@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -44,6 +45,9 @@ public class EsLambdaQueryWrapper<T> {
 
     /** nested 子文档条件：属性名 + 作用于子实体类型的子 Wrapper */
     record NestedLeaf(String property, EsLambdaQueryWrapper<?> inner) {}
+
+    /** script 过滤条件：painless source + 参数（filter context，不打分） */
+    record ScriptLeaf(String source, Map<String, Object> params) {}
 
     record SortSpec(String property, boolean asc) {}
 
@@ -198,6 +202,24 @@ public class EsLambdaQueryWrapper<T> {
     public EsLambdaQueryWrapper<T> or() {
         pendingOr = true;
         return this;
+    }
+
+    /**
+     * script 过滤（painless，filter context 不打分），可与普通条件任意组合。
+     * source 为用户自写脚本（如 "doc['stock'].value > params.min"），注入风险自担。
+     */
+    public EsLambdaQueryWrapper<T> script(String source, Map<String, Object> params) {
+        if (source == null || source.isBlank()) {
+            throw new EsOpsException("script source 不能为空");
+        }
+        nodes.add(new Node(pendingOr, new ScriptLeaf(source, params == null ? Map.of() : params)));
+        pendingOr = false;
+        return this;
+    }
+
+    /** script 过滤（无参数） */
+    public EsLambdaQueryWrapper<T> script(String source) {
+        return script(source, Map.of());
     }
 
     /** 嵌套分组，组内条件与组外以 AND 连接 */

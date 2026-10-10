@@ -30,6 +30,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -340,6 +341,32 @@ class ProductMapperIntegrationTest {
         assertEquals(1, mapper.selectList(new EsLambdaQueryWrapper<Product>()
                 .multiMatch(EsMultiMatch.type(EsMultiMatch.MatchType.BEST_FIELDS).operatorAnd(),
                         "静音 无线", Product::getDescription)).size());
+    }
+
+    @Test
+    void scriptQuery() {
+        seedThree();
+
+        // 带 params：库存 > 50 → 仅 ID_1（100）
+        var hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .script("doc['stock'].value > params.min", Map.of("min", 50)));
+        assertEquals(1, hits.size());
+        assertEquals(ID_1, hits.get(0).getId());
+
+        // 无 params：库存 >= 50 → ID_1 + ID_2
+        var hits2 = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .script("doc['stock'].value >= 50"));
+        assertEquals(2, hits2.size());
+
+        // 与普通条件组合：script 过滤 + keyword 等值
+        var combined = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .script("doc['stock'].value >= 10")
+                .eq(Product::getOnSale, false));
+        assertEquals(1, combined.size());
+        assertEquals(ID_3, combined.get(0).getId());
+
+        // 空 source 拒绝
+        assertThrows(EsOpsException.class, () -> new EsLambdaQueryWrapper<Product>().script(" "));
     }
 
     @Test

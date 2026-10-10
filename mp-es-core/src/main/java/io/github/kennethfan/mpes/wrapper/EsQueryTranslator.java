@@ -14,6 +14,7 @@ import io.github.kennethfan.mpes.support.EsOpsException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 /**
@@ -53,6 +54,8 @@ public final class EsQueryTranslator {
                 q = multiMatchQuery(mm, resolver, prefix);
             } else if (node.content() instanceof EsLambdaQueryWrapper.NestedLeaf nested) {
                 q = nestedQuery(nested, resolver, prefix);
+            } else if (node.content() instanceof EsLambdaQueryWrapper.ScriptLeaf script) {
+                q = scriptQuery(script);
             } else {
                 q = toQuery((EsLambdaQueryWrapper<?>) node.content(), resolver, prefix);
             }
@@ -184,6 +187,19 @@ public final class EsQueryTranslator {
             sb.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1).toLowerCase());
         }
         return sb.toString();
+    }
+
+    /** script 过滤：painless source + params（JsonData 包装），filter context */
+    private static Query scriptQuery(EsLambdaQueryWrapper.ScriptLeaf script) {
+        return Query.of(q -> q.script(s -> s.script(sc -> {
+            sc.source(script.source());
+            if (!script.params().isEmpty()) {
+                Map<String, JsonData> params = new java.util.LinkedHashMap<>();
+                script.params().forEach((k, v) -> params.put(k, JsonData.of(v)));
+                sc.params(params);
+            }
+            return sc;
+        })));
     }
 
     /** nested 子文档条件：path 为 nested 字段的完整路径，内部用子实体元数据递归翻译（字段带 path 前缀） */
