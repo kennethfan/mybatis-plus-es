@@ -30,6 +30,10 @@ public class EsAggResult {
                     .map(b -> new EsBucket(b.key(), b.docCount(), new EsAggResult(b.aggregations()))).toList();
             case DateHistogram -> agg.dateHistogram().buckets().array().stream()
                     .map(b -> new EsBucket(b.key(), b.docCount(), new EsAggResult(b.aggregations()))).toList();
+            // range 聚合固定 keyed(true)，响应为 keyed map（key = 区间命名或自动「from-to」串）
+            case Range -> agg.range().buckets().keyed().entrySet().stream()
+                    .map(e -> new EsBucket(e.getKey(), e.getValue().from(), e.getValue().to(),
+                            e.getValue().docCount(), new EsAggResult(e.getValue().aggregations()))).toList();
             default -> throw new EsOpsException("聚合 " + name + " 不是分桶类型: " + agg._kind());
         };
     }

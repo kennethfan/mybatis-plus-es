@@ -21,11 +21,12 @@ public class EsAgg {
     private static final List<String> CALENDAR_INTERVALS =
             List.of("second", "minute", "hour", "day", "week", "month", "quarter", "year");
 
-    public enum Type { TERMS, AVG, MAX, MIN, SUM, STATS, CARDINALITY, DATE_HISTOGRAM }
+    public enum Type { TERMS, AVG, MAX, MIN, SUM, STATS, CARDINALITY, DATE_HISTOGRAM, RANGE }
 
     private final Type type;
     private final String property;
     private final List<EsAgg> children = new ArrayList<>();
+    private final List<EsAggRange> ranges = new ArrayList<>();
     private String name;
     private Integer size;
     private String dateInterval;
@@ -83,6 +84,20 @@ public class EsAgg {
         }
         EsAgg agg = new EsAgg(Type.DATE_HISTOGRAM, LambdaUtils.propertyName(col));
         agg.dateInterval = interval.toLowerCase();
+        return agg;
+    }
+
+    /**
+     * 数值区间分桶（range，仅用于数值类型字段），至少一个区间。
+     * 桶 key 为区间命名（{@link EsAggRange#key(String)}）或自动「from-to」串；
+     * 可通过桶的 {@link EsBucket#getFrom()} / {@link EsBucket#getTo()} 取边界。
+     */
+    public static <T> EsAgg range(SFunction<T, ?> col, EsAggRange... ranges) {
+        if (ranges == null || ranges.length == 0) {
+            throw new IllegalArgumentException("range 聚合至少需要一个区间");
+        }
+        EsAgg agg = new EsAgg(Type.RANGE, LambdaUtils.propertyName(col));
+        agg.ranges.addAll(Arrays.asList(ranges));
         return agg;
     }
 
@@ -151,6 +166,10 @@ public class EsAgg {
 
     public String getDateInterval() {
         return dateInterval;
+    }
+
+    public List<EsAggRange> getRanges() {
+        return ranges;
     }
 
     public String getDateFormat() {

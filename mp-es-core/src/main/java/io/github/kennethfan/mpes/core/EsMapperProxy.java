@@ -17,6 +17,7 @@ import co.elastic.clients.elasticsearch._types.Result;
 import co.elastic.clients.json.JsonData;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.kennethfan.mpes.agg.EsAgg;
+import io.github.kennethfan.mpes.agg.EsAggRange;
 import io.github.kennethfan.mpes.agg.EsAggResult;
 import io.github.kennethfan.mpes.highlight.EsHighlight;
 import io.github.kennethfan.mpes.highlight.EsHit;
@@ -627,6 +628,24 @@ public class EsMapperProxy<T> implements InvocationHandler {
                         dh.minDocCount(agg.getDateMinDocCount());
                     }
                     return dh;
+                });
+                case RANGE -> a.range(r -> {
+                    r.field(field).keyed(true);
+                    for (EsAggRange range : agg.getRanges()) {
+                        r.ranges(ar -> {
+                            if (range.from() != null) {
+                                ar.from(range.from());
+                            }
+                            if (range.to() != null) {
+                                ar.to(range.to());
+                            }
+                            if (range.key() != null) {
+                                ar.key(range.key());
+                            }
+                            return ar;
+                        });
+                    }
+                    return r;
                 });
                 case AVG -> a.avg(v -> v.field(field));
                 case MAX -> a.max(v -> v.field(field));

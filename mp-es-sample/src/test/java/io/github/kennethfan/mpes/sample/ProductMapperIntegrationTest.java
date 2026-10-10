@@ -2,6 +2,7 @@ package io.github.kennethfan.mpes.sample;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import io.github.kennethfan.mpes.agg.EsAgg;
+import io.github.kennethfan.mpes.agg.EsAggRange;
 import io.github.kennethfan.mpes.agg.EsAggResult;
 import io.github.kennethfan.mpes.agg.EsBucket;
 import io.github.kennethfan.mpes.geo.GeoPoint;
@@ -339,6 +340,32 @@ class ProductMapperIntegrationTest {
         // 非法 interval 直接拒绝
         assertThrows(IllegalArgumentException.class,
                 () -> EsAgg.dateHistogram(Product::getLaunchDate, "fortnight"));
+    }
+
+    @Test
+    void rangeAggByPrice() {
+        seedThree();
+
+        // 价格区间：budget [0,1000) → 键盘+鼠标 2 条；premium [1000,null) → 显示器 1 条
+        var buckets = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.range(Product::getPrice,
+                        EsAggRange.of(0.0, 1000.0).key("budget"),
+                        EsAggRange.of(1000.0, null).key("premium"))).buckets("price");
+
+        assertEquals(2, buckets.size());
+        var budget = buckets.stream().filter(b -> "budget".equals(b.getKey())).findFirst().orElseThrow();
+        var premium = buckets.stream().filter(b -> "premium".equals(b.getKey())).findFirst().orElseThrow();
+        assertEquals(2, budget.getCount());
+        assertEquals(0.0, budget.getFrom(), 0.001);
+        assertEquals(1000.0, budget.getTo(), 0.001);
+        assertEquals(1, premium.getCount());
+        assertEquals(1000.0, premium.getFrom(), 0.001);
+        assertNull(premium.getTo());
+
+        // from >= to 直接拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAggRange.of(1000.0, 0.0));
+        // 双端为空直接拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAggRange.of(null, null));
     }
 
     // ---------- 嵌套子聚合 ----------
