@@ -14,7 +14,7 @@ NAV = [
     ]),
     ("核心", [
         ("entity-mapping", "实体映射"),
-        ("index-management", "Index 托管"),
+        ("index-management", "Index 托管与运维"),
         ("crud", "CRUD 与条件写"),
         ("wrapper", "条件查询 Wrapper"),
         ("search-enhanced", "查询增强"),
@@ -118,7 +118,7 @@ P["index"] = ("概览", """
 <div class="grid">
   <div class="card"><b>API 对齐 MP</b><span>EsBaseMapper 签名与 LambdaQueryWrapper 写法对齐 BaseMapper，MyBatis-Plus 用户零学习成本</span></div>
   <div class="card"><b>无 MyBatis 管线</b><span>JDK 动态代理直连 elasticsearch-java，仅复用 MP 注解作映射来源</span></div>
-  <div class="card"><b>Index 托管</b><span>启动时 create-if-absent + mapping 一致性校验（WARN / FAIL）</span></div>
+  <div class="card"><b>Index 托管与运维</b><span>启动 create-if-absent + mapping 校验；运行期 rebuild 零停机平滑重建 / alias 原子切换 / 索引模板</span></div>
   <div class="card"><b>完整写路径</b><span>insert / update / delete 全家桶：按主键、批量、按条件（update_by_query / delete_by_query）</span></div>
   <div class="card"><b>深分页</b><span>search_after 游标翻页，无 10000 窗口限制，不重不漏</span></div>
   <div class="card"><b>聚合与高亮</b><span>7 种聚合 + 任意深度子聚合；selectHighlighted 返回实体 + 片段</span></div>
@@ -287,9 +287,9 @@ p.setLocation(new GeoPoint(39.90, 116.40));
 <div class="warn"><b>⚠️</b> 不支持的字段类型用 <code>@TableField(exist = false)</code> 排除，否则启动报「不支持的字段类型」。</div>
 """)
 
-P["index-management"] = ("Index 托管", """
-<h1>Index 托管</h1>
-<p class="lead">对标 MP 的表结构托管：应用启动时保证索引存在且 mapping 与实体一致。</p>
+P["index-management"] = ("Index 托管与运维", """
+<h1>Index 托管与运维</h1>
+<p class="lead">启动时保证索引存在且 mapping 一致（托管）；运行期支持零停机平滑重建与 alias/模板运维（EsIndexOps）。</p>
 
 <h2>行为</h2>
 <ul>

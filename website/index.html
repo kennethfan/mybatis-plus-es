@@ -24,7 +24,7 @@
 <div class="nav-group">
 <div class="nav-label">核心</div>
 <a href="entity-mapping.html">实体映射</a>
-<a href="index-management.html">Index 托管</a>
+<a href="index-management.html">Index 托管与运维</a>
 <a href="crud.html">CRUD 与条件写</a>
 <a href="wrapper.html">条件查询 Wrapper</a>
 <a href="search-enhanced.html">查询增强</a>
@@ -51,7 +51,7 @@
 <div class="grid">
   <div class="card"><b>API 对齐 MP</b><span>EsBaseMapper 签名与 LambdaQueryWrapper 写法对齐 BaseMapper，MyBatis-Plus 用户零学习成本</span></div>
   <div class="card"><b>无 MyBatis 管线</b><span>JDK 动态代理直连 elasticsearch-java，仅复用 MP 注解作映射来源</span></div>
-  <div class="card"><b>Index 托管</b><span>启动时 create-if-absent + mapping 一致性校验（WARN / FAIL）</span></div>
+  <div class="card"><b>Index 托管与运维</b><span>启动 create-if-absent + mapping 校验；运行期 rebuild 零停机平滑重建 / alias 原子切换 / 索引模板</span></div>
   <div class="card"><b>完整写路径</b><span>insert / update / delete 全家桶：按主键、批量、按条件（update_by_query / delete_by_query）</span></div>
   <div class="card"><b>深分页</b><span>search_after 游标翻页，无 10000 窗口限制，不重不漏</span></div>
   <div class="card"><b>聚合与高亮</b><span>7 种聚合 + 任意深度子聚合；selectHighlighted 返回实体 + 片段</span></div>
