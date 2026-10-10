@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.github.kennethfan.mpes.core.EsEntityRegistry;
+import io.github.kennethfan.mpes.index.EsIndexOps;
 import io.github.kennethfan.mpes.index.IndexManager;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
@@ -73,6 +74,13 @@ public class EsAutoConfiguration {
                                        EsEntityRegistry esEntityRegistry,
                                        EsProperties properties) {
         return new IndexManager(elasticsearchClient, esEntityRegistry, properties);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public EsIndexOps esIndexOps(ElasticsearchClient elasticsearchClient,
+                                 EsEntityRegistry esEntityRegistry) {
+        return new EsIndexOps(elasticsearchClient, esEntityRegistry);
     }
 
     @Bean

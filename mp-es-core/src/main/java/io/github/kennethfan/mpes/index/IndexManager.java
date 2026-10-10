@@ -60,8 +60,8 @@ public class IndexManager {
         log.info("[mp-es] 已创建索引 {}（{} 个字段）", md.getIndexName(), md.getFields().size());
     }
 
-    /** 实体元数据 → ES mapping properties（nested 字段递归展开子实体） */
-    private Map<String, Property> propertiesOf(EntityMetadata md) {
+    /** 实体元数据 → ES mapping properties（nested 字段递归展开子实体）；EsIndexOps 运维操作复用 */
+    static Map<String, Property> propertiesOf(EntityMetadata md) {
         Map<String, Property> props = new LinkedHashMap<>();
         for (FieldMetadata f : md.getFields()) {
             props.put(f.getEsFieldName(), propertyOf(f));
@@ -69,7 +69,7 @@ public class IndexManager {
         return props;
     }
 
-    private Property propertyOf(FieldMetadata f) {
+    private static Property propertyOf(FieldMetadata f) {
         return switch (f.getEsType()) {
             case "keyword" -> Property.of(p -> p.keyword(k -> k));
             case "text" -> Property.of(p -> p.text(t -> t.analyzer(f.getAnalyzer())));

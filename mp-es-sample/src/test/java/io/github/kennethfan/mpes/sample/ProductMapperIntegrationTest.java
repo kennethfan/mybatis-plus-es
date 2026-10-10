@@ -8,6 +8,8 @@ import io.github.kennethfan.mpes.agg.EsBucket;
 import io.github.kennethfan.mpes.geo.GeoPoint;
 import io.github.kennethfan.mpes.highlight.EsHighlight;
 import io.github.kennethfan.mpes.highlight.EsHit;
+import io.github.kennethfan.mpes.index.EsIndexOps;
+import io.github.kennethfan.mpes.index.ReindexReport;
 import io.github.kennethfan.mpes.page.EsAfter;
 import io.github.kennethfan.mpes.page.EsAfterResult;
 import io.github.kennethfan.mpes.page.Page;
@@ -56,6 +58,9 @@ class ProductMapperIntegrationTest {
 
     @Autowired
     private ElasticsearchClient client;
+
+    @Autowired
+    private EsIndexOps ops;
 
     static boolean esAvailable() {
         try (Socket socket = new Socket()) {
@@ -907,6 +912,37 @@ class ProductMapperIntegrationTest {
         } finally {
             mapper.delete(new EsLambdaQueryWrapper<Product>().gt(Product::getId, baseId));
             refresh();
+        }
+    }
+
+    @Test
+    void opsExistsDropAndCreateNew() {
+        // createNew → 时间戳后缀新物理索引，exists=true → drop 后 false
+        String fresh = ops.createNew(Product.class);
+        assertTrue(fresh.startsWith("mpes_product-"));
+        try {
+            assertTrue(ops.exists(fresh));
+        } finally {
+            ops.drop(fresh);
+        }
+        assertTrue(!ops.exists(fresh));
+        // 不存在的索引 drop → 显式报错
+        assertThrows(EsOpsException.class, () -> ops.drop(fresh));
+    }
+
+    @Test
+    void opsReindexCopiesData() throws IOException {
+        seedThree();
+        refresh();
+        String fresh = ops.createNew(Product.class);
+        try {
+            ReindexReport report = ops.reindex("mpes_product", fresh);
+            assertEquals(3, report.total());
+            assertEquals(3, report.created());
+            client.indices().refresh(r -> r.index(fresh));
+            assertEquals(3L, client.count(c -> c.index(fresh)).count());
+        } finally {
+            ops.drop(fresh);
         }
     }
 }
