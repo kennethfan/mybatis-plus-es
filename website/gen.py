@@ -305,10 +305,49 @@ P["index-management"] = ("Index 托管", """
   <tr><td><code>FAIL</code></td><td>直接抛异常，阻断启动（适合强约束环境）</td></tr>
 </table>
 
-<h2>mapping 演进（当前约束）</h2>
-<p>ES 不支持修改已有字段类型。实体字段类型变更后需<b>删除旧索引重建</b>（数据需自行迁移）：</p>
-""" + code('curl -X DELETE localhost:9200/mpes_product') + """
-<div class="tip"><b>💡</b> alias 切换 + reindex 的零停机重建在 Roadmap 中（见 <a href="roadmap.html">Roadmap</a>）。</div>
+<h2>mapping 演进：索引运维（EsIndexOps）</h2>
+<p>ES 不支持修改已有字段类型。十一期起容器注入 <code>EsIndexOps</code>，一行完成平滑重建，期间查询写入不中断：</p>
+""" + code('''
+@Autowired
+private EsIndexOps indexOps;
+
+// 建时间戳新索引 → reindex 全量搬迁 → alias 切换 → 删旧索引
+RebuildResult result = indexOps.rebuild(Product.class);''') + """
+<p><code>rebuild(entity)</code> 三种起点自动识别：</p>
+<table>
+  <tr><th>起点</th><th>行为</th></tr>
+  <tr><td>索引不存在</td><td>建新索引并挂 alias（空索引起步）</td></tr>
+  <tr><td>物理索引（存量首次）</td><td>建新 → reindex → 删旧物理索引 → 同名升格 alias</td></tr>
+  <tr><td>已是 alias</td><td>建新 → reindex 旧物理索引 → aliasSwap 原子切换 → 删旧</td></tr>
+</table>
+
+<h2>基础件</h2>
+<table>
+  <tr><th>方法</th><th>语义</th></tr>
+  <tr><td><code>exists(index)</code></td><td>索引 / alias 是否存在</td></tr>
+  <tr><td><code>drop(index)</code></td><td>删除物理索引（不存在报错）</td></tr>
+  <tr><td><code>createNew(entity)</code></td><td>按实体最新 mapping 建「索引名-毫秒时间戳」新物理索引</td></tr>
+  <tr><td><code>create(index, entity)</code></td><td>按实体 mapping 建指定名物理索引</td></tr>
+  <tr><td><code>reindex(from, to)</code></td><td>全量搬迁（同步等待，完成后自动 refresh），返回 <code>ReindexReport</code></td></tr>
+</table>
+
+<h2>alias 原子操作</h2>
+<table>
+  <tr><th>方法</th><th>语义</th></tr>
+  <tr><td><code>aliasAdd(alias, index)</code></td><td>首挂 alias</td></tr>
+  <tr><td><code>aliasSwap(alias, removeIndex, addIndex)</code></td><td>单请求 remove+add 原子切换，查询零闪断</td></tr>
+  <tr><td><code>aliasIndexes(alias)</code></td><td>alias 当前指向的物理索引列表</td></tr>
+</table>
+
+<h2>索引模板</h2>
+<table>
+  <tr><th>方法</th><th>语义</th></tr>
+  <tr><td><code>putTemplate(name, indexPattern, entity)</code></td><td>按实体 mapping 写入模板，pattern 匹配的新索引自动套用</td></tr>
+  <tr><td><code>templateExists(name)</code></td><td>模板是否存在</td></tr>
+  <tr><td><code>dropTemplate(name)</code></td><td>删除模板</td></tr>
+</table>
+
+<div class="tip"><b>💡</b> rebuild 后实体索引名升格为 alias 语义，读写均走 alias，对 Mapper 层透明；alias 指向多个物理索引时拒绝重建（请先收敛为单索引）。</div>
 """)
 
 P["crud"] = ("CRUD 与条件写", """
@@ -689,7 +728,7 @@ P["faq"] = ("语义边界与 FAQ", """
 
 P["roadmap"] = ("Roadmap", """
 <h1>Roadmap</h1>
-<p class="lead">已完成六个迭代；候选方向按需排期，欢迎提 issue 讨论。</p>
+<p class="lead">已完成十一个迭代 + 发布落地，Roadmap 全部完成；新方向欢迎提 issue 讨论。</p>
 
 <h2>已完成</h2>
 <table>
@@ -700,17 +739,16 @@ P["roadmap"] = ("Roadmap", """
   <tr><td>四期</td><td>条件删除、条件更新（painless script）、批量部分更新</td></tr>
   <tr><td>五期</td><td>查询增强：multiMatch、fuzzy、prefix、boost</td></tr>
   <tr><td>六期</td><td>工程化：GitHub Actions CI、Javadoc 质量门槛、Maven Central 发布准备</td></tr>
+  <tr><td>七期</td><td>上限与可控性：limit(n)、selectList 超 1000 显式报错、terms 聚合 size 可配</td></tr>
+  <tr><td>八期</td><td>聚合扩展：date_histogram、range、top_hits（含 Asc 重载）、terms 分桶排序</td></tr>
+  <tr><td>九期</td><td>查询增强续：multi_match type/operator 可配（EsMultiMatch）、script 过滤、collapse 去重</td></tr>
+  <tr><td>十期</td><td>nested 进阶：nested 排序（含子过滤）、nested 聚合、inner_hits（selectListWithNestedHits）</td></tr>
+  <tr><td>十一期</td><td>索引运维：EsIndexOps——exists/drop/createNew/reindex 基础件、alias 原子操作、rebuild 一键平滑重建（存量迁移）、索引模板</td></tr>
+  <tr><td>发布落地</td><td>Maven Central v0.1.1（tag 触发 CI 全自动发布 + 自动建 GitHub Release）</td></tr>
 </table>
 
 <h2>候选方向</h2>
-<table>
-  <tr><th>方向</th><th>内容</th></tr>
-  <tr><td>索引运维</td><td>alias 切换、reindex 重建 mapping、索引模板——解决「改实体必须删索引」痛点</td></tr>
-  <tr><td>nested 进阶</td><td>nested 排序（NestedSortValue）、nested 聚合、inner_hits（返回命中子文档）</td></tr>
-  <tr><td>聚合扩展</td><td>date_histogram、range、top_hits、分桶排序（order by sub-agg）</td></tr>
-  <tr><td>查询增强续</td><td>multi_match 的 type/operator 配置、script 查询、collapse 去重</td></tr>
-  <tr><td>发布落地</td><td>Maven Central 实际发布（需 Central Portal 账号 + GPG）</td></tr>
-</table>
+<p>Roadmap 全部完成，新方向欢迎提 <a href="https://github.com/kennethfan/mybatis-plus-es/issues">issue</a> 讨论。</p>
 
 <h2>文档站</h2>
 <p>本站点为纯静态 HTML，源码位于仓库 <code>website/</code>，push 到 main 后由 GitHub Actions 自动发布到 GitHub Pages。</p>
