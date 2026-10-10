@@ -90,7 +90,15 @@ public class IndexManager {
 
     private void validate(EntityMetadata md) throws IOException {
         GetMappingResponse resp = client.indices().getMapping(g -> g.index(md.getIndexName()));
-        Map<String, Property> existing = resp.result().get(md.getIndexName()).mappings().properties();
+        // 实体索引名可能是 alias（rebuild 后升格）：响应 key 为物理索引名，取任一指向索引的 mapping
+        Map<String, Property> existing;
+        if (resp.result().containsKey(md.getIndexName())) {
+            existing = resp.result().get(md.getIndexName()).mappings().properties();
+        } else if (!resp.result().isEmpty()) {
+            existing = resp.result().values().iterator().next().mappings().properties();
+        } else {
+            throw new EsOpsException("Index 托管校验失败: " + md.getIndexName() + " 无可用 mapping");
+        }
 
         List<String> problems = new ArrayList<>();
         for (FieldMetadata f : md.getFields()) {

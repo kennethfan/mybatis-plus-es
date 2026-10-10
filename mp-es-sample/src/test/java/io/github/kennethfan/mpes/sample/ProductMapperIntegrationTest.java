@@ -1056,4 +1056,54 @@ class ProductMapperIntegrationTest {
         }
         assertTrue(!ops.templateExists(template));
     }
+
+    @Test
+    void opsReindexSourceMissingThrows() {
+        assertThrows(EsOpsException.class, () -> ops.reindex("mpes_not_exists", "mpes_product"));
+    }
+
+    @Test
+    void opsRebuildFromScratch() {
+        // 空索引起步：连 mpes_product 都删掉 → rebuild 应建新索引并挂 alias
+        resetToPhysicalIndex();
+        try {
+            ops.drop("mpes_product");
+
+            RebuildResult result = ops.rebuild(Product.class);
+            assertTrue(result.freshIndex().startsWith("mpes_product-"));
+            assertNull(result.previousIndex());
+            assertEquals(0, result.reindexed());
+            assertEquals(List.of(result.freshIndex()), ops.aliasIndexes("mpes_product"));
+
+            // alias 上直接写入查询（空索引起步即进入 alias 语义）
+            mapper.insert(product(ID_1, "空索引起步", "rebuild from scratch", "1.00", 1, "2026-03-01", true));
+            refresh();
+            assertEquals(1L, mapper.selectCount(null));
+        } finally {
+            resetToPhysicalIndex();
+        }
+    }
+
+    @Test
+    void opsRebuildRejectsMultiAlias() {
+        resetToPhysicalIndex();
+        try {
+            // alias 与同名物理索引不能共存：先删物理索引，再挂双 alias 模拟坏状态
+            ops.drop("mpes_product");
+            String i1 = ops.createNew(Product.class);
+            String i2 = ops.createNew(Product.class);
+            ops.aliasAdd("mpes_product", i1);
+            ops.aliasAdd("mpes_product", i2);
+            try {
+                // alias 指向多个物理索引 → 拒绝重建（拒绝后不残留 fresh 索引）
+                assertThrows(EsOpsException.class, () -> ops.rebuild(Product.class));
+                assertEquals(2, ops.aliasIndexes("mpes_product").size());
+            } finally {
+                ops.drop(i1);
+                ops.drop(i2);
+            }
+        } finally {
+            resetToPhysicalIndex();
+        }
+    }
 }
