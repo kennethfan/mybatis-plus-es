@@ -279,6 +279,8 @@ mvn -B -ntp javadoc:javadoc -pl mp-es-core   # Javadoc 可生成（质量门槛�
 | 四期 | 条件删除（delete）、条件更新（update + painless script）、批量部分更新（updateBatchById） |
 | 五期 | 查询增强：multiMatch、fuzzy、prefix、boost 权重 |
 | 六期 | 工程化：GitHub Actions CI、Javadoc 质量门槛、Maven Central 发布准备 |
+| 七期 | 上限与可控性：limit(n) 返回条数控制、selectList 超 1000 显式报错、terms 聚合 size 可配 |
+| 八期 | 聚合扩展：date_histogram、range、top_hits（含 Asc 重载）、terms 分桶排序（orderBy sub-agg） |
 
 **候选方向**（按需排期，欢迎提 issue 讨论）
 
@@ -286,6 +288,5 @@ mvn -B -ntp javadoc:javadoc -pl mp-es-core   # Javadoc 可生成（质量门槛�
 |---|---|
 | 索引运维 | alias 切换、reindex 重建 mapping、索引模板——解决「改实体必须删索引」的痛点 |
 | nested 进阶 | nested 排序（NestedSortValue）、nested 聚合、inner_hits（返回命中的子文档） |
-| 聚合扩展 | date_histogram、range、top_hits、分桶排序（order by sub-agg） |
 | 查询增强续 | multi_match 的 type/operator 配置、script 查询、collapse 去重 |
-| 发布落地 | Maven Central 实际发布（需 Central Portal 账号 + GPG） |
+| 发布落地 | **进行中**：发布链路已就绪（central-publishing-maven-plugin + tag 触发 CI），待 Central Portal secrets 配置与首次发布 |
