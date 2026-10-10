@@ -2,10 +2,13 @@ package io.github.kennethfan.mpes.index;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.Conflicts;
+import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.ExpandWildcard;
 import co.elastic.clients.elasticsearch.core.ReindexResponse;
 import co.elastic.clients.elasticsearch.indices.DeleteIndexRequest;
 import co.elastic.clients.elasticsearch.indices.ExistsRequest;
+import co.elastic.clients.elasticsearch.indices.GetAliasResponse;
+import co.elastic.clients.elasticsearch.indices.update_aliases.Action;
 import io.github.kennethfan.mpes.core.EsEntityRegistry;
 import io.github.kennethfan.mpes.metadata.EntityMetadata;
 import io.github.kennethfan.mpes.support.EsOpsException;
@@ -15,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 /**
  * 索引运维（十一期）：基础件。独立于 {@link IndexManager}（启动托管），
@@ -26,7 +30,8 @@ import java.time.format.DateTimeFormatter;
 @RequiredArgsConstructor
 public class EsIndexOps {
 
-    private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    /** 时间戳后缀（毫秒精度）：同一秒内连续 rebuild 不撞名 */
+    private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
 
     private final ElasticsearchClient client;
     private final EsEntityRegistry registry;
@@ -93,6 +98,47 @@ public class EsIndexOps {
             log.info("[mp-es] 已创建索引 {}（{} 个字段）", index, md.getFields().size());
         } catch (IOException e) {
             throw new EsOpsException("创建索引失败: " + index, e);
+        }
+    }
+
+    /** 给物理索引挂 alias（首次接入 alias 语义用） */
+    public void aliasAdd(String alias, String index) {
+        try {
+            client.indices().updateAliases(u -> u.actions(
+                    a -> a.add(ad -> ad.index(index).aliases(alias))));
+            log.info("[mp-es] alias {} -> {}", alias, index);
+        } catch (IOException e) {
+            throw new EsOpsException("挂 alias 失败: " + alias + " -> " + index, e);
+        }
+    }
+
+    /**
+     * alias 原子切换：单请求内 remove 旧索引 + add 新索引，切换瞬间查询零闪断。
+     * rebuild 的核心动作。
+     */
+    public void aliasSwap(String alias, String removeIndex, String addIndex) {
+        try {
+            client.indices().updateAliases(u -> u.actions(
+                    Action.of(a -> a.remove(r -> r.index(removeIndex).aliases(alias))),
+                    Action.of(a -> a.add(ad -> ad.index(addIndex).aliases(alias)))));
+            log.info("[mp-es] alias {} 原子切换: {} -> {}", alias, removeIndex, addIndex);
+        } catch (IOException e) {
+            throw new EsOpsException("alias 原子切换失败: " + alias + " " + removeIndex + " -> " + addIndex, e);
+        }
+    }
+
+    /** alias 当前指向的物理索引列表（alias 不存在返回空） */
+    public List<String> aliasIndexes(String alias) {
+        try {
+            GetAliasResponse resp = client.indices().getAlias(g -> g.name(alias));
+            return resp.result().keySet().stream().sorted().toList();
+        } catch (ElasticsearchException e) {
+            if (e.status() == 404) {
+                return List.of();
+            }
+            throw new EsOpsException("查询 alias 失败: " + alias, e);
+        } catch (IOException e) {
+            throw new EsOpsException("查询 alias 失败: " + alias, e);
         }
     }
 }

@@ -945,4 +945,24 @@ class ProductMapperIntegrationTest {
             ops.drop(fresh);
         }
     }
+
+    @Test
+    void opsAliasAddSwapAndList() {
+        String i1 = ops.createNew(Product.class);
+        String i2 = ops.createNew(Product.class);
+        try {
+            // 不存在的 alias → 空列表
+            assertTrue(ops.aliasIndexes("mpes_product_alias").isEmpty());
+
+            ops.aliasAdd("mpes_product_alias", i1);
+            assertEquals(List.of(i1), ops.aliasIndexes("mpes_product_alias"));
+
+            // 原子切换：单请求 remove + add，指向变化
+            ops.aliasSwap("mpes_product_alias", i1, i2);
+            assertEquals(List.of(i2), ops.aliasIndexes("mpes_product_alias"));
+        } finally {
+            ops.drop(i1);
+            ops.drop(i2);
+        }
+    }
 }
