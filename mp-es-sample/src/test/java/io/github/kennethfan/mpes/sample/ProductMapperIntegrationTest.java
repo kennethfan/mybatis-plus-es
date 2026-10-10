@@ -1041,4 +1041,19 @@ class ProductMapperIntegrationTest {
         mapper.deleteBatchIds(List.of(ID_1, ID_2, ID_3, 90004L));
         refresh();
     }
+
+    @Test
+    void opsPutTemplateAndExists() {
+        String template = "mpes-product-template";
+        try {
+            assertTrue(!ops.templateExists(template));
+            ops.putTemplate(template, "mpes_product-*", Product.class);
+            assertTrue(ops.templateExists(template));
+        } finally {
+            if (ops.templateExists(template)) {
+                ops.dropTemplate(template);
+            }
+        }
+        assertTrue(!ops.templateExists(template));
+    }
 }

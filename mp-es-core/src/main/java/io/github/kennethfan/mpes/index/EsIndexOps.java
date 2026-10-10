@@ -195,4 +195,39 @@ public class EsIndexOps {
         log.info("[mp-es] rebuild {} 完成（存量物理索引迁移）: {}", canonical, fresh);
         return new RebuildResult(fresh, canonical, n);
     }
+
+    /**
+     * 写入索引模板：index pattern 匹配的新索引自动套用实体 mapping（滚动索引 / 分索引场景）。
+     * 同名模板覆盖更新。
+     */
+    public void putTemplate(String name, String indexPattern, Class<?> entity) {
+        EntityMetadata md = registry.get(entity);
+        try {
+            client.indices().putIndexTemplate(p -> p.name(name)
+                    .indexPatterns(indexPattern)
+                    .template(t -> t.mappings(m -> m.properties(IndexManager.propertiesOf(md)))));
+            log.info("[mp-es] 已写入索引模板 {}（pattern={}，{} 个字段）", name, indexPattern, md.getFields().size());
+        } catch (IOException e) {
+            throw new EsOpsException("写入索引模板失败: " + name, e);
+        }
+    }
+
+    /** 模板是否存在 */
+    public boolean templateExists(String name) {
+        try {
+            return client.indices().existsIndexTemplate(e -> e.name(name)).value();
+        } catch (IOException e) {
+            throw new EsOpsException("探测索引模板失败: " + name, e);
+        }
+    }
+
+    /** 删除索引模板 */
+    public void dropTemplate(String name) {
+        try {
+            client.indices().deleteIndexTemplate(d -> d.name(name));
+            log.info("[mp-es] 已删除索引模板 {}", name);
+        } catch (IOException e) {
+            throw new EsOpsException("删除索引模板失败: " + name, e);
+        }
+    }
 }
