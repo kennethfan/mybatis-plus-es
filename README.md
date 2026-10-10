@@ -212,6 +212,12 @@ List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
 - **nested 排序**：`wrapper.orderByNested(nestedCol, Child.class, Child::getField, asc)`，可带子过滤重载（仅过滤命中的子文档参与排序）；字段须为 @EsNested
 - **nested 聚合**：`EsAgg.nested(nestedCol, EsAgg.avg(Child::getField)...)`——子聚合 lambda 用子实体类型，字段自动加 path 前缀；结果经 `EsAggResult.nested(name)` 取单桶（count=nested 文档数，子聚合经 bucket.getAggs() 取）
 - **nested inner_hits**：`wrapper.nested(col, Child.class, size, w -> ...)`（size = 每父文档最多返回的命中子文档数）+ `mapper.selectListWithNestedHits(wrapper, Child.class)` → `NestedHit<T,C>`（entity 父实体 + hits 命中子文档）；wrapper 内最多一个带 innerHitsSize 的 nested 条件
+- **索引运维（EsIndexOps，Spring 容器注入）**：解决「改实体必须删索引」痛点
+  - 基础件：`exists(index)` / `drop(index)` / `createNew(entity)`（按实体最新 mapping 建「索引名-毫秒时间戳」新物理索引）/ `create(index, entity)` / `reindex(from, to)`（同步等待，conflicts=proceed，完成后自动 refresh 目标索引，返回 `ReindexReport`）
+  - alias 原子操作：`aliasAdd(alias, index)` 首挂 / `aliasSwap(alias, removeIndex, addIndex)` 单请求原子切换（查询零闪断）/ `aliasIndexes(alias)` 查指向
+  - **一键平滑重建**：`indexOps.rebuild(Product.class)`——三种起点自动识别（索引不存在 / 存量物理索引 / 已是 alias），建时间戳新索引 → reindex 全量搬迁 → alias 切换 → 删旧索引，期间查询写入不中断；返回 `RebuildResult(freshIndex, previousIndex, reindexed)`
+  - 索引模板：`putTemplate(name, indexPattern, entity)`（pattern 匹配的新索引自动套用实体 mapping）/ `templateExists` / `dropTemplate`
+  - rebuild 后实体索引名升格为 alias 语义，读写均走 alias，对 Mapper 层透明
 - `selectOne` 命中多条直接抛异常（不静默取首条）
 - `deleteBatchIds` / `deleteByQuery` 使用 `conflicts=proceed`：删除目标刚被更新时跳过该条而非整体 409 失败
 - 主键（@TableId）同时作为 ES 文档 `_id` 与 `_source` 字段
@@ -289,10 +295,9 @@ mvn -B -ntp javadoc:javadoc -pl mp-es-core   # Javadoc 可生成（质量门槛�
 | 八期 | 聚合扩展：date_histogram、range、top_hits（含 Asc 重载）、terms 分桶排序（orderBy sub-agg） |
 | 九期 | 查询增强续：multi_match type/operator 可配（EsMultiMatch）、script 过滤、collapse 去重 |
 | 十期 | nested 进阶：nested 排序（含子过滤）、nested 聚合、inner_hits（selectListWithNestedHits） |
-| 发布落地 | v0.1.0 已发布至 Maven Central（io.github.kennethfan:mp-es-core:0.1.0，tag v0.1.0 触发 CI 自动发布） |
+| 十一期 | 索引运维：EsIndexOps——exists/drop/createNew/reindex 基础件、aliasAdd/aliasSwap/aliasIndexes 原子操作、rebuild 一键平滑重建（存量迁移）、索引模板（putTemplate/templateExists/dropTemplate） |
+| 发布落地 | v0.1.1 已发布至 Maven Central（io.github.kennethfan:mp-es-core:0.1.1，tag v0.1.1 触发 CI 全自动发布 + 自动建 GitHub Release） |
 
 **候选方向**（按需排期，欢迎提 issue 讨论）
 
-| 方向 | 内容 |
-|---|---|
-| 索引运维 | alias 切换、reindex 重建 mapping、索引模板——解决「改实体必须删索引」的痛点 |
+Roadmap 全部完成，新方向欢迎提 issue。
