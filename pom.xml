@@ -83,7 +83,10 @@
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.11.0</version>
+                        <!-- 0.11.0 回归：install-file 产生的 maven-metadata-local.xml 未被
+                             Pre Bundling 清理，Portal 校验 "Bundle has content that does NOT
+                             have a .pom file" 失败；0.9.0 清理链路正常（官方样例验证） -->
+                        <version>0.9.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
