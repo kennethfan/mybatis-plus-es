@@ -80,6 +80,8 @@ public class EsIndexOps {
                     .source(s -> s.index(from))
                     .dest(d -> d.index(to))
                     .conflicts(Conflicts.Proceed));
+            // reindex 完成后文档仍在目标索引的写缓冲中（不自动 refresh），主动刷新使立即可查
+            client.indices().refresh(rf -> rf.index(to));
             ReindexReport report = new ReindexReport(resp.total(), resp.created(), resp.updated(),
                     resp.versionConflicts());
             log.info("[mp-es] reindex {} -> {} 完成: total={}, created={}, updated={}, conflicts={}",
@@ -88,6 +90,11 @@ public class EsIndexOps {
         } catch (IOException e) {
             throw new EsOpsException("reindex 失败: " + from + " -> " + to, e);
         }
+    }
+
+    /** 按实体当前 mapping 创建指定名物理索引（rebuild 编排复用，与 IndexManager#create 同构） */
+    public void create(String index, Class<?> entity) {
+        createWithMapping(index, registry.get(entity));
     }
 
     /** 按实体元数据创建物理索引（供 rebuild 编排复用，与 IndexManager#create 同构） */
@@ -140,5 +147,52 @@ public class EsIndexOps {
         } catch (IOException e) {
             throw new EsOpsException("查询 alias 失败: " + alias, e);
         }
+    }
+
+    /**
+     * 一键平滑重建：按实体最新 mapping 建时间戳新索引 → 全量搬迁 → alias 切换 → 删旧索引。
+     * 实体索引名自此升格为 alias 语义，重建期间查询写入不中断。
+     * <p>三种起点自动识别：
+     * <ol>
+     *   <li>索引不存在 → 建新索引并挂 alias（空索引起步）</li>
+     *   <li>物理索引（存量首次）→ 建新 → reindex → 删旧物理索引（alias 与同名物理索引不能共存）→ 挂 alias</li>
+     *   <li>已是 alias → 建新 → reindex 旧物理索引 → aliasSwap 原子切换 → 删旧</li>
+     * </ol>
+     *
+     * @return 新物理索引名、重建前的旧物理索引名（空索引起步为 null）、搬迁文档数
+     */
+    public RebuildResult rebuild(Class<?> entity) {
+        EntityMetadata md = registry.get(entity);
+        String canonical = md.getIndexName();
+        String fresh = canonical + "-" + TS.format(LocalDateTime.now());
+        createWithMapping(fresh, md);
+        if (!exists(canonical)) {
+            aliasAdd(canonical, fresh);
+            log.info("[mp-es] rebuild {} 完成（空索引起步）: {}", canonical, fresh);
+            return new RebuildResult(fresh, null, 0);
+        }
+
+        List<String> aliasIdx = aliasIndexes(canonical);
+        if (!aliasIdx.isEmpty()) {
+            // 已是 alias：原子切换，旧物理索引退役
+            if (aliasIdx.size() > 1) {
+                drop(fresh);
+                throw new EsOpsException("alias " + canonical + " 指向 " + aliasIdx.size()
+                        + " 个索引 " + aliasIdx + "，拒绝重建（请先收敛为单索引）");
+            }
+            String old = aliasIdx.get(0);
+            long n = reindex(old, fresh).total();
+            aliasSwap(canonical, old, fresh);
+            drop(old);
+            log.info("[mp-es] rebuild {} 完成（alias 原子切换）: {} -> {}", canonical, old, fresh);
+            return new RebuildResult(fresh, old, n);
+        }
+
+        // 存量首次：canonical 是物理索引，删除后同名升格为 alias
+        long n = reindex(canonical, fresh).total();
+        drop(canonical);
+        aliasAdd(canonical, fresh);
+        log.info("[mp-es] rebuild {} 完成（存量物理索引迁移）: {}", canonical, fresh);
+        return new RebuildResult(fresh, canonical, n);
     }
 }

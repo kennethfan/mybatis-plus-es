@@ -9,6 +9,7 @@ import io.github.kennethfan.mpes.geo.GeoPoint;
 import io.github.kennethfan.mpes.highlight.EsHighlight;
 import io.github.kennethfan.mpes.highlight.EsHit;
 import io.github.kennethfan.mpes.index.EsIndexOps;
+import io.github.kennethfan.mpes.index.RebuildResult;
 import io.github.kennethfan.mpes.index.ReindexReport;
 import io.github.kennethfan.mpes.page.EsAfter;
 import io.github.kennethfan.mpes.page.EsAfterResult;
@@ -964,5 +965,80 @@ class ProductMapperIntegrationTest {
             ops.drop(i1);
             ops.drop(i2);
         }
+    }
+
+    @Test
+    void opsRebuildFromPhysicalIndexMigratesData() throws IOException {
+        resetToPhysicalIndex();
+        try {
+            // 存量首次：mpes_product 是物理索引且有数据
+            seedThree();
+            refresh();
+            assertEquals(3L, mapper.selectCount(null));   // 前置校验：reindex 前数据可见
+
+            RebuildResult result = ops.rebuild(Product.class);
+            assertTrue(result.freshIndex().startsWith("mpes_product-"));
+            assertEquals("mpes_product", result.previousIndex());
+            assertEquals(3, result.reindexed());
+
+            // mpes_product 升格为 alias 指向新索引（旧物理索引删除后同名 alias 接管）
+            assertEquals(List.of(result.freshIndex()), ops.aliasIndexes("mpes_product"));
+
+            // 查询链路走 alias 正常读
+            assertEquals(3, mapper.selectCount(null));
+        } finally {
+            resetToPhysicalIndex();
+        }
+    }
+
+    @Test
+    void opsRebuildFromAliasAtomicSwap() throws IOException {
+        resetToPhysicalIndex();
+        try {
+            seedThree();
+            refresh();
+            // 先做一次 rebuild 进入 alias 语义
+            String first = ops.rebuild(Product.class).freshIndex();
+            // 写入新数据后二次 rebuild（用独立 ID 避免与 seed 冲突）
+            mapper.insert(product(90004L, "重建后新增", "rebuild 二次校验", "1.00", 1, "2026-02-01", true));
+            refresh();
+
+            RebuildResult result = ops.rebuild(Product.class);
+            assertTrue(result.freshIndex().startsWith("mpes_product-"));
+            assertEquals(first, result.previousIndex());
+            assertEquals(4, result.reindexed());
+
+            // alias 原子切到最新索引，首建索引已退役，数据全量保留
+            assertEquals(List.of(result.freshIndex()), ops.aliasIndexes("mpes_product"));
+            assertTrue(!ops.exists(first));
+            assertEquals(4L, mapper.selectCount(null));
+        } finally {
+            resetToPhysicalIndex();
+        }
+    }
+
+    /** 把 mpes_product 恢复为干净空物理索引（拆 alias / 删残留时间戳索引），保证测试顺序无关 */
+    private void resetToPhysicalIndex() {
+        List<String> pointed = ops.aliasIndexes("mpes_product");
+        // rebuild 遗留的孤儿物理索引（不在 alias 指向内的 mpes_product-*）
+        try {
+            for (String name : client.indices().get(g -> g.index("mpes_product-*")).result().keySet()) {
+                if (!name.equals("mpes_product") && !pointed.contains(name)) {
+                    ops.drop(name);
+                }
+            }
+        } catch (IOException e) {
+            throw new EsOpsException("清理遗留索引失败", e);
+        }
+        // 拆 alias：删掉指向的物理索引（alias 随之消失），重建同名空物理索引
+        for (String idx : pointed) {
+            ops.drop(idx);
+        }
+        if (!ops.exists("mpes_product")) {
+            // 必须带实体 mapping 建（空 mapping 会被动态映射污染，破坏后续 nested/keyword 测试）
+            ops.create("mpes_product", Product.class);
+        }
+        mapper.deleteBatchIds(List.of(ID_1, ID_2, ID_3, 90004L));
+        refresh();
     }
 }
