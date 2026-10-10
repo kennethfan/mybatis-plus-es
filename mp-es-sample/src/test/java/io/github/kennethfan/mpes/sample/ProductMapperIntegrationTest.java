@@ -370,6 +370,35 @@ class ProductMapperIntegrationTest {
     }
 
     @Test
+    void collapseDedup() {
+        long id4 = 90004L;
+        try {
+            seedThree();
+            // 再插入一条同名商品（与 ID_1 同 productName）
+            mapper.insert(product(id4, "机械键盘 K870", "客制化机械键盘 茶轴", "459.00", 80, "2026-02-10", true));
+            refresh();
+
+            // 不折叠：同名 2 条
+            assertEquals(2, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                    .eq(Product::getProductName, "机械键盘 K870")).size());
+
+            // collapse 折叠后：每组仅保留 1 条 → 1 条
+            var deduped = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                    .eq(Product::getProductName, "机械键盘 K870")
+                    .collapse(Product::getProductName));
+            assertEquals(1, deduped.size());
+            assertNotNull(deduped.get(0));
+
+            // 全量 collapse：4 条文档去重同名 → 3 条
+            assertEquals(3, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                    .collapse(Product::getProductName)).size());
+        } finally {
+            mapper.deleteById(id4);
+            refresh();
+        }
+    }
+
+    @Test
     void dateHistogramByMonth() {
         seedThree();
 

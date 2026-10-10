@@ -404,14 +404,21 @@ public class EsMapperProxy<T> implements InvocationHandler {
                 EsQueryTranslator.toSorts(wrapper, fieldResolver);
         Integer limit = wrapper.getLimit();
         int size = limit != null ? limit : MAX_LIST_SIZE;
+        String collapseField = wrapper.getCollapseProperty() != null
+                ? metadata.fieldByProperty(wrapper.getCollapseProperty()).getEsFieldName()
+                : null;
         try {
-            var resp = client.search(s -> s
-                            .index(metadata.getIndexName())
-                            .query(query)
-                            .sort(sorts)
-                            .size(size)
-                            .trackTotalHits(t -> t.enabled(true)),
-                    (Class<Object>) metadata.getEntityClass());
+            var resp = client.search(s -> {
+                s.index(metadata.getIndexName())
+                        .query(query)
+                        .sort(sorts)
+                        .size(size)
+                        .trackTotalHits(t -> t.enabled(true));
+                if (collapseField != null) {
+                    s.collapse(c -> c.field(collapseField));
+                }
+                return s;
+            }, (Class<Object>) metadata.getEntityClass());
             List<?> src = resp.hits().hits().stream().map(Hit::source).toList();
             checkListCap(wrapper, resp.hits().total(), src.size());
             return (List<E>) src;

@@ -70,6 +70,10 @@ public class EsLambdaQueryWrapper<T> {
     @Getter
     private Integer limit;
 
+    /** 字段折叠（collapse，仅 selectList 生效）：按字段值去重，每组保留排序最优 1 条 */
+    @Getter
+    private String collapseProperty;
+
     private boolean pendingOr;
 
     // ---------- 条件 ----------
@@ -257,6 +261,15 @@ public class EsLambdaQueryWrapper<T> {
     }
 
     // ---------- 排序 ----------
+
+    /**
+     * 字段折叠去重（collapse，仅 selectList 生效；ES 限制仅 keyword/数值字段）。
+     * 每个字段值只保留排序最优的一条；selectCount 不受影响（ES total 为折叠前命中数）。
+     */
+    public EsLambdaQueryWrapper<T> collapse(SFunction<T, ?> col) {
+        this.collapseProperty = LambdaUtils.propertyName(col);
+        return this;
+    }
 
     @SafeVarargs
     public final EsLambdaQueryWrapper<T> orderByAsc(SFunction<T, ?>... cols) {
