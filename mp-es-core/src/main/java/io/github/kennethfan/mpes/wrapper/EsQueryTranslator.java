@@ -3,7 +3,9 @@ package io.github.kennethfan.mpes.wrapper;
 import co.elastic.clients.elasticsearch._types.FieldValue;
 import co.elastic.clients.elasticsearch._types.SortOptions;
 import co.elastic.clients.elasticsearch._types.SortOrder;
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import co.elastic.clients.json.JsonData;
 import io.github.kennethfan.mpes.geo.GeoPoint;
 import io.github.kennethfan.mpes.metadata.EntityMetadata;
@@ -155,13 +157,33 @@ public final class EsQueryTranslator {
                 .map(p -> prefix + resolver.apply(p).getEsFieldName())
                 .toList();
         Float boost = mm.boost();
+        EsMultiMatch options = mm.options();
         return Query.of(q -> q.multiMatch(m -> {
             m.fields(fields).query(String.valueOf(mm.value()));
             if (boost != null) {
                 m.boost(boost);
             }
+            if (options != null) {
+                // ES 枚举常量为驼峰（BestFields/PhrasePrefix），按名映射
+                m.type(TextQueryType.valueOf(toEnumName(options.type().name())));
+                if (options.operator() == EsMultiMatch.Operator.AND) {
+                    m.operator(Operator.And);
+                }
+                if (options.minimumShouldMatch() != null) {
+                    m.minimumShouldMatch(options.minimumShouldMatch());
+                }
+            }
             return m;
         }));
+    }
+
+    /** UPPER_SNAKE → UpperCamel（BEST_FIELDS → BestFields），用于映射 ES 枚举常量 */
+    private static String toEnumName(String name) {
+        StringBuilder sb = new StringBuilder();
+        for (String part : name.split("_")) {
+            sb.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1).toLowerCase());
+        }
+        return sb.toString();
     }
 
     /** nested 子文档条件：path 为 nested 字段的完整路径，内部用子实体元数据递归翻译（字段带 path 前缀） */

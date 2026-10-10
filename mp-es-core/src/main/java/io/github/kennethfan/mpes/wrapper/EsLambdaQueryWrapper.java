@@ -39,8 +39,8 @@ public class EsLambdaQueryWrapper<T> {
      */
     record Leaf(Op op, String property, List<Object> values, Float boost) {}
 
-    /** multi_match 条件：跨多字段分词检索（best_fields），boost 可空 */
-    record MultiMatchLeaf(List<String> properties, Object value, Float boost) {}
+    /** multi_match 条件：跨多字段分词检索，boost 与 type/operator 等 options 均可空 */
+    record MultiMatchLeaf(List<String> properties, Object value, Float boost, EsMultiMatch options) {}
 
     /** nested 子文档条件：属性名 + 作用于子实体类型的子 Wrapper */
     record NestedLeaf(String property, EsLambdaQueryWrapper<?> inner) {}
@@ -124,20 +124,32 @@ public class EsLambdaQueryWrapper<T> {
 
     /** 跨多字段分词检索（multi_match，默认 best_fields） */
     public EsLambdaQueryWrapper<T> multiMatch(Object value, SFunction<T, ?>... cols) {
-        return multiMatchInternal(null, value, cols);
+        return multiMatchInternal(null, null, value, cols);
     }
 
     /** 跨多字段分词检索（带权重 boost） */
     public EsLambdaQueryWrapper<T> multiMatch(float boost, Object value, SFunction<T, ?>... cols) {
-        return multiMatchInternal(boost, value, cols);
+        return multiMatchInternal(null, boost, value, cols);
     }
 
-    private EsLambdaQueryWrapper<T> multiMatchInternal(Float boost, Object value, SFunction<T, ?>... cols) {
+    /** 跨多字段分词检索（自定义 type/operator 等，见 {@link EsMultiMatch}） */
+    public EsLambdaQueryWrapper<T> multiMatch(EsMultiMatch options, Object value, SFunction<T, ?>... cols) {
+        return multiMatchInternal(options, null, value, cols);
+    }
+
+    /** 跨多字段分词检索（自定义配置 + 权重 boost） */
+    public EsLambdaQueryWrapper<T> multiMatch(EsMultiMatch options, float boost, Object value,
+                                              SFunction<T, ?>... cols) {
+        return multiMatchInternal(options, boost, value, cols);
+    }
+
+    private EsLambdaQueryWrapper<T> multiMatchInternal(EsMultiMatch options, Float boost, Object value,
+                                                       SFunction<T, ?>... cols) {
         if (cols == null || cols.length == 0) {
             throw new EsOpsException("multiMatch 至少需要一个字段");
         }
         List<String> props = Arrays.stream(cols).map(LambdaUtils::propertyName).toList();
-        nodes.add(new Node(pendingOr, new MultiMatchLeaf(props, value, boost)));
+        nodes.add(new Node(pendingOr, new MultiMatchLeaf(props, value, boost, options)));
         pendingOr = false;
         return this;
     }

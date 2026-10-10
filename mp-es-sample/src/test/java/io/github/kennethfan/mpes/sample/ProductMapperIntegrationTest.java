@@ -16,6 +16,7 @@ import io.github.kennethfan.mpes.sample.entity.Sku;
 import io.github.kennethfan.mpes.sample.mapper.ProductMapper;
 import io.github.kennethfan.mpes.support.EsOpsException;
 import io.github.kennethfan.mpes.wrapper.EsLambdaQueryWrapper;
+import io.github.kennethfan.mpes.wrapper.EsMultiMatch;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -312,6 +313,33 @@ class ProductMapperIntegrationTest {
         assertThrows(IllegalArgumentException.class, () -> EsAgg.avg(Product::getPrice).size(2));
         // 非正数拒绝
         assertThrows(IllegalArgumentException.class, () -> EsAgg.terms(Product::getProductName).size(0));
+    }
+
+    // ---------- 查询增强续（九期） ----------
+
+    @Test
+    void multiMatchTypeAndOperator() {
+        seedThree();
+
+        // PHRASE 短语检索：「无线鼠标」在 ID_2 描述中按序出现 → 1 条；乱序「鼠标 无线」→ 0 条
+        assertEquals(1, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch(EsMultiMatch.type(EsMultiMatch.MatchType.PHRASE), "无线鼠标",
+                        Product::getDescription)).size());
+        assertEquals(0, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch(EsMultiMatch.type(EsMultiMatch.MatchType.PHRASE), "鼠标 无线",
+                        Product::getDescription)).size());
+
+        // operatorAnd：默认 OR 时「静音 4K」命中 ID_2 + ID_3 两条；AND 后无一文档同时含两词 → 0 条
+        assertEquals(2, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch("静音 4K", Product::getDescription)).size());
+        assertEquals(0, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch(EsMultiMatch.type(EsMultiMatch.MatchType.BEST_FIELDS).operatorAnd(),
+                        "静音 4K", Product::getDescription)).size());
+
+        // operatorAnd 命中场景：「静音 无线」均只在 ID_2 描述出现 → 1 条
+        assertEquals(1, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch(EsMultiMatch.type(EsMultiMatch.MatchType.BEST_FIELDS).operatorAnd(),
+                        "静音 无线", Product::getDescription)).size());
     }
 
     @Test
