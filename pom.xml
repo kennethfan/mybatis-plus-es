@@ -13,7 +13,7 @@
 
     <groupId>io.github.kennethfan</groupId>
     <artifactId>mybatis-plus-es</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <packaging>pom</packaging>
     <name>mybatis-plus-es</name>
     <description>MyBatis-Plus 风格 API 操作 Elasticsearch 的适配层：沿用 MP 的 Mapper / Wrapper 写法，底层直连 Elasticsearch 官方 Java API Client，不经过任何 MyBatis 执行机制</description>
@@ -40,19 +40,6 @@
         <connection>scm:git:https://github.com/kennethfan/mybatis-plus-es.git</connection>
         <developerConnection>scm:git:git@github.com:kennethfan/mybatis-plus-es.git</developerConnection>
     </scm>
-
-    <distributionManagement>
-        <repository>
-            <id>central</id>
-            <name>Maven Central</name>
-            <url>https://central.sonatype.com/api/v1/publisher</url>
-        </repository>
-        <snapshotRepository>
-            <id>central</id>
-            <name>Maven Central Snapshots</name>
-            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
-        </snapshotRepository>
-    </distributionManagement>
 
     <modules>
         <module>mp-es-core</module>
@@ -85,12 +72,27 @@
         </dependencies>
     </dependencyManagement>
 
-    <!-- 发布专用：-Prelease 激活（sources + javadoc + gpg 签名），普通构建与 CI 不受影响 -->
+    <!-- 发布专用：-Prelease 激活（sources + javadoc + gpg + Central 上传），普通构建与 CI 不受影响。
+         central-publishing-maven-plugin 以 extensions 方式接管 deploy：凭 settings.xml 中 id=central 的
+         User Token 上传 Central Portal；autoPublish=true 时校验通过后自动发布，无需网页点 Publish -->
     <profiles>
         <profile>
             <id>release</id>
             <build>
                 <plugins>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.11.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <excludeArtifacts>
+                                <artifact>mp-es-sample</artifact>
+                            </excludeArtifacts>
+                        </configuration>
+                    </plugin>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>

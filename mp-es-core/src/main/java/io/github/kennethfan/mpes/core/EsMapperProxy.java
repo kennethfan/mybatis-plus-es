@@ -3,6 +3,7 @@ package io.github.kennethfan.mpes.core;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.FieldValue;
 import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
+import co.elastic.clients.elasticsearch._types.aggregations.CalendarInterval;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
@@ -11,10 +12,15 @@ import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.core.search.Highlight;
 import co.elastic.clients.elasticsearch.core.search.HighlightField;
 import co.elastic.clients.elasticsearch.core.search.Hit;
+import co.elastic.clients.elasticsearch.core.search.InnerHitsResult;
+import co.elastic.clients.elasticsearch.core.search.TotalHits;
 import co.elastic.clients.elasticsearch._types.Result;
+import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.json.JsonData;
+import co.elastic.clients.util.NamedValue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.kennethfan.mpes.agg.EsAgg;
+import io.github.kennethfan.mpes.agg.EsAggRange;
 import io.github.kennethfan.mpes.agg.EsAggResult;
 import io.github.kennethfan.mpes.highlight.EsHighlight;
 import io.github.kennethfan.mpes.highlight.EsHit;
@@ -43,7 +49,7 @@ import java.util.Map;
  */
 public class EsMapperProxy<T> implements InvocationHandler {
 
-    /** selectList 的全量上限 */
+    /** selectList / selectHighlighted 未显式 limit 时的默认返回上限 */
     private static final int MAX_LIST_SIZE = 1_000;
 
     private final Class<T> mapperInterface;
@@ -84,6 +90,8 @@ public class EsMapperProxy<T> implements InvocationHandler {
             case "selectHighlighted" -> selectHighlighted(
                     (EsLambdaQueryWrapper<?>) args[0], (EsHighlight<?>) args[1]);
             case "aggregate" -> aggregate((EsLambdaQueryWrapper<?>) args[0], (EsAgg[]) args[1]);
+            case "selectListWithNestedHits" -> selectListWithNestedHits(
+                    (EsLambdaQueryWrapper<?>) args[0], (Class<?>) args[1]);
             case "toString" -> mapperInterface.getSimpleName() + "@" + metadata.getIndexName();
             case "hashCode" -> System.identityHashCode(proxy);
             case "equals" -> proxy == args[0];
@@ -397,18 +405,82 @@ public class EsMapperProxy<T> implements InvocationHandler {
         Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
         List<co.elastic.clients.elasticsearch._types.SortOptions> sorts =
                 EsQueryTranslator.toSorts(wrapper, fieldResolver);
+        Integer limit = wrapper.getLimit();
+        int size = limit != null ? limit : MAX_LIST_SIZE;
+        String collapseField = wrapper.getCollapseProperty() != null
+                ? metadata.fieldByProperty(wrapper.getCollapseProperty()).getEsFieldName()
+                : null;
+        try {
+            var resp = client.search(s -> {
+                s.index(metadata.getIndexName())
+                        .query(query)
+                        .sort(sorts)
+                        .size(size)
+                        .trackTotalHits(t -> t.enabled(true));
+                if (collapseField != null) {
+                    s.collapse(c -> c.field(collapseField));
+                }
+                return s;
+            }, (Class<Object>) metadata.getEntityClass());
+            List<?> src = resp.hits().hits().stream().map(Hit::source).toList();
+            checkListCap(wrapper, resp.hits().total(), src.size());
+            return (List<E>) src;
+        } catch (IOException e) {
+            throw new EsOpsException("selectList 失败: " + metadata.getIndexName(), e);
+        }
+    }
+
+    /**
+     * 未显式 limit 时，命中数超过单次上限（{@value #MAX_LIST_SIZE}）即报错，
+     * 杜绝静默截断丢数据；显式 limit(n) 视为用户已知并接受的结果规模，不再拦截。
+     */
+    private void checkListCap(EsLambdaQueryWrapper<?> wrapper, TotalHits total, int fetched) {
+        if (wrapper.getLimit() != null) {
+            return;
+        }
+        long totalHits = total != null ? total.value() : fetched;
+        if (totalHits > MAX_LIST_SIZE) {
+            throw new EsOpsException("命中 " + totalHits + " 条，超过单次上限 " + MAX_LIST_SIZE
+                    + "（索引 " + metadata.getIndexName() + "）。请加 .limit(n)（上限 "
+                    + EsLambdaQueryWrapper.MAX_RESULT_WINDOW + "）或改用 selectAfter 深分页");
+        }
+    }
+
+    /** nested 检索 + inner_hits：命中子文档按 inner_hits 命名（= nested path，含前缀）取回并反序列化 */
+    @SuppressWarnings("unchecked")
+    private <E, C> List<NestedHit<E, C>> selectListWithNestedHits(EsLambdaQueryWrapper<?> wrapper,
+                                                                  Class<C> childType) {
+        List<EsLambdaQueryWrapper.NestedInnerHits> innerHitLeaves = wrapper.getInnerHitsRequests();
+        if (innerHitLeaves.size() != 1) {
+            throw new EsOpsException("selectListWithNestedHits 要求 wrapper 恰有一个带 innerHitsSize 的 "
+                    + "nested() 条件，实际 " + innerHitLeaves.size() + " 个");
+        }
+        String path = metadata.fieldByProperty(innerHitLeaves.get(0).property()).getEsFieldName();
+        Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
+        List<co.elastic.clients.elasticsearch._types.SortOptions> sorts =
+                EsQueryTranslator.toSorts(wrapper, fieldResolver);
+        Integer limit = wrapper.getLimit();
+        int size = limit != null ? limit : MAX_LIST_SIZE;
         try {
             var resp = client.search(s -> s
                             .index(metadata.getIndexName())
                             .query(query)
                             .sort(sorts)
-                            .size(MAX_LIST_SIZE)
+                            .size(size)
                             .trackTotalHits(t -> t.enabled(true)),
                     (Class<Object>) metadata.getEntityClass());
-            List<?> src = resp.hits().hits().stream().map(Hit::source).toList();
-            return (List<E>) src;
+            List<NestedHit<E, C>> result = new ArrayList<>();
+            for (Hit<Object> hit : resp.hits().hits()) {
+                InnerHitsResult inner = hit.innerHits().get(path);
+                List<C> children = inner == null ? List.of()
+                        : inner.hits().hits().stream()
+                                .map(h -> (C) h.source().to(childType))
+                                .toList();
+                result.add(new NestedHit<>((E) hit.source(), children));
+            }
+            return result;
         } catch (IOException e) {
-            throw new EsOpsException("selectList 失败: " + metadata.getIndexName(), e);
+            throw new EsOpsException("selectListWithNestedHits 失败: " + metadata.getIndexName(), e);
         }
     }
 
@@ -523,15 +595,18 @@ public class EsMapperProxy<T> implements InvocationHandler {
                 .preTags(highlight.getPreTag())
                 .postTags(highlight.getPostTag())
                 .fields(fieldSpecs));
+        Integer limit = wrapper.getLimit();
+        int size = limit != null ? limit : MAX_LIST_SIZE;
         try {
             var resp = client.search(s -> s
                             .index(metadata.getIndexName())
                             .query(query)
                             .highlight(hl)
-                            .size(MAX_LIST_SIZE)
+                            .size(size)
                             .trackTotalHits(t -> t.enabled(true)),
                     Map.class);
             List<?> src = resp.hits().hits().stream().map(this::toHit).toList();
+            checkListCap(wrapper, resp.hits().total(), src.size());
             return (List<EsHit<E>>) src;
         } catch (IOException e) {
             throw new EsOpsException("selectHighlighted 失败: " + metadata.getIndexName(), e);
@@ -564,7 +639,7 @@ public class EsMapperProxy<T> implements InvocationHandler {
         Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
         Map<String, Aggregation> spec = new LinkedHashMap<>();
         for (EsAgg agg : aggs) {
-            spec.put(agg.getName(), toAggregation(agg));
+            spec.put(agg.getName(), toAggregation(agg, fieldResolver, ""));
         }
         try {
             var resp = client.search(s -> s
@@ -579,18 +654,82 @@ public class EsMapperProxy<T> implements InvocationHandler {
         }
     }
 
-    private Aggregation toAggregation(EsAgg agg) {
-        String field = metadata.fieldByProperty(agg.getProperty()).getEsFieldName();
+    /** terms orderBy 的 metric 必须是 _count/_key 或已挂载的子聚合名，防 ES 静默失败 */
+    private void validateTermsOrder(EsAgg agg) {
+        String metric = agg.getOrderMetric();
+        if ("_count".equals(metric) || "_key".equals(metric)) {
+            return;
+        }
+        boolean exists = agg.getChildren().stream().anyMatch(c -> metric.equals(c.getName()));
+        if (!exists) {
+            throw new EsOpsException("terms orderBy 子聚合不存在: " + metric
+                    + "，已挂载: " + agg.getChildren().stream().map(EsAgg::getName).toList());
+        }
+    }
+
+    private Aggregation toAggregation(EsAgg agg, EsQueryTranslator.FieldResolver resolver, String prefix) {
+        // top_hits 无属性概念，field 仅对字段类聚合解析
+        String field = agg.getProperty() != null
+                ? prefix + resolver.apply(agg.getProperty()).getEsFieldName()
+                : null;
         Map<String, Aggregation> sub = new LinkedHashMap<>();
+        EsQueryTranslator.FieldResolver childResolver = resolver;
+        String childPrefix = prefix;
+        if (agg.getType() == EsAgg.Type.NESTED) {
+            // nested 聚合：子聚合进入子文档作用域，字段用子实体元数据 + path 前缀解析
+            FieldMetadata fm = resolver.apply(agg.getProperty());
+            if (!"nested".equals(fm.getEsType()) || fm.getNestedMetadata() == null) {
+                throw new EsOpsException("字段 " + fm.getEsFieldName()
+                        + " 不是 nested 类型（@EsNested），不能使用 nested 聚合");
+            }
+            childResolver = fm.getNestedMetadata()::fieldByProperty;
+            childPrefix = fm.getEsFieldName() + ".";
+        }
         for (EsAgg child : agg.getChildren()) {
-            sub.put(child.getName(), toAggregation(child));
+            sub.put(child.getName(), toAggregation(child, childResolver, childPrefix));
         }
         // 8.19 客户端：a.terms()/a.avg() 等返回 ContainerBuilder，子聚合挂在它上面
         return Aggregation.of(a -> {
             Aggregation.Builder.ContainerBuilder c = switch (agg.getType()) {
                 case TERMS -> a.terms(t -> {
-                    t.field(field).size(100);
+                    t.field(field).size(agg.getSize() != null ? agg.getSize() : 100);
+                    if (agg.getOrderMetric() != null) {
+                        validateTermsOrder(agg);
+                        t.order(NamedValue.of(agg.getOrderMetric(),
+                                Boolean.TRUE.equals(agg.getOrderDesc())
+                                        ? SortOrder.Desc : SortOrder.Asc));
+                    }
                     return t;
+                });
+                case DATE_HISTOGRAM -> a.dateHistogram(dh -> {
+                    dh.field(field).calendarInterval(CalendarInterval.valueOf(
+                            Character.toUpperCase(agg.getDateInterval().charAt(0))
+                                    + agg.getDateInterval().substring(1)));
+                    if (agg.getDateFormat() != null) {
+                        dh.format(agg.getDateFormat());
+                    }
+                    if (agg.getDateMinDocCount() != null) {
+                        dh.minDocCount(agg.getDateMinDocCount());
+                    }
+                    return dh;
+                });
+                case RANGE -> a.range(r -> {
+                    r.field(field).keyed(true);
+                    for (EsAggRange range : agg.getRanges()) {
+                        r.ranges(ar -> {
+                            if (range.from() != null) {
+                                ar.from(range.from());
+                            }
+                            if (range.to() != null) {
+                                ar.to(range.to());
+                            }
+                            if (range.key() != null) {
+                                ar.key(range.key());
+                            }
+                            return ar;
+                        });
+                    }
+                    return r;
                 });
                 case AVG -> a.avg(v -> v.field(field));
                 case MAX -> a.max(v -> v.field(field));
@@ -598,6 +737,17 @@ public class EsMapperProxy<T> implements InvocationHandler {
                 case SUM -> a.sum(v -> v.field(field));
                 case STATS -> a.stats(v -> v.field(field));
                 case CARDINALITY -> a.cardinality(v -> v.field(field));
+                case NESTED -> a.nested(n -> n.path(field));
+                case TOP_HITS -> a.topHits(th -> {
+                    th.size(agg.getTopSize());
+                    for (EsAgg.TopSort sort : agg.getTopSorts()) {
+                        String sortField = prefix
+                                + resolver.apply(sort.property()).getEsFieldName();
+                        th.sort(so -> so.field(f -> f.field(sortField)
+                                .order(sort.asc() ? SortOrder.Asc : SortOrder.Desc)));
+                    }
+                    return th;
+                });
             };
             if (!sub.isEmpty()) {
                 c.aggregations(sub);

@@ -11,3 +11,6 @@ xpack.encryptedSavedObjects.encryptionKey: "mpes-local-dev-encryption-key-012345
 
 # 本地开发用不到 Fleet（安全关闭后其 authz 轮询会持续刷 INFO 日志）
 xpack.fleet.enabled: false
+
+# 注意：不要配置 xpack.enterprise_search.enabled——8.19 已移除该配置键（插件弃用），
+# 其 _has_privileges ERROR 仅在主动访问对应页面时出现，不访问则无刷屏。

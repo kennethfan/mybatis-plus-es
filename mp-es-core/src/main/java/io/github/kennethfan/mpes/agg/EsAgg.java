@@ -11,16 +11,34 @@ import java.util.List;
  * 聚合描述（Lambda 静态工厂，API 对齐 MP 风格）。
  * <p>
  * 一期七种：terms / avg / max / min / sum / stats / cardinality；
- * 聚合名默认取属性名，可 {@link #as(String)} 显式命名；三期支持 {@link #subAgg(EsAgg...)} 桶内嵌套。
+ * 七期补 terms size；八期起 dateHistogram / range / topHits；
+ * 聚合名默认取属性名（topHits 无属性，默认名 topHits），可 {@link #as(String)} 显式命名；
+ * 三期支持 {@link #subAgg(EsAgg...)} 桶内嵌套。
  */
 public class EsAgg {
 
-    public enum Type { TERMS, AVG, MAX, MIN, SUM, STATS, CARDINALITY }
+    /** date_histogram 支持的时间间隔（对应 ES CalendarInterval） */
+    private static final List<String> CALENDAR_INTERVALS =
+            List.of("second", "minute", "hour", "day", "week", "month", "quarter", "year");
+
+    public enum Type { TERMS, AVG, MAX, MIN, SUM, STATS, CARDINALITY, DATE_HISTOGRAM, RANGE, TOP_HITS, NESTED }
+
+    /** top_hits 的排序字段（property + 方向） */
+    public record TopSort(String property, boolean asc) {}
 
     private final Type type;
     private final String property;
     private final List<EsAgg> children = new ArrayList<>();
+    private final List<EsAggRange> ranges = new ArrayList<>();
+    private final List<TopSort> topSorts = new ArrayList<>();
     private String name;
+    private Integer size;
+    private Integer topSize;
+    private String dateInterval;
+    private String dateFormat;
+    private Integer dateMinDocCount;
+    private String orderMetric;
+    private Boolean orderDesc;
 
     private EsAgg(Type type, String property) {
         this.type = type;
@@ -62,9 +80,115 @@ public class EsAgg {
         return new EsAgg(Type.CARDINALITY, LambdaUtils.propertyName(col));
     }
 
+    /**
+     * 按时间分桶（date_histogram，仅用于 date 类型字段）。
+     * interval 取值：second / minute / hour / day / week / month / quarter / year；
+     * 可链式 {@link #format(String)} 与 {@link #minDocCount(int)}。
+     */
+    public static <T> EsAgg dateHistogram(SFunction<T, ?> col, String interval) {
+        if (interval == null || !CALENDAR_INTERVALS.contains(interval.toLowerCase())) {
+            throw new IllegalArgumentException("interval 仅支持 " + CALENDAR_INTERVALS + "，实际: " + interval);
+        }
+        EsAgg agg = new EsAgg(Type.DATE_HISTOGRAM, LambdaUtils.propertyName(col));
+        agg.dateInterval = interval.toLowerCase();
+        return agg;
+    }
+
+    /**
+     * 数值区间分桶（range，仅用于数值类型字段），至少一个区间。
+     * 桶 key 为区间命名（{@link EsAggRange#key(String)}）或自动「from-to」串；
+     * 可通过桶的 {@link EsBucket#getFrom()} / {@link EsBucket#getTo()} 取边界。
+     */
+    public static <T> EsAgg range(SFunction<T, ?> col, EsAggRange... ranges) {
+        if (ranges == null || ranges.length == 0) {
+            throw new IllegalArgumentException("range 聚合至少需要一个区间");
+        }
+        EsAgg agg = new EsAgg(Type.RANGE, LambdaUtils.propertyName(col));
+        agg.ranges.addAll(Arrays.asList(ranges));
+        return agg;
+    }
+
+    /**
+     * nested 子文档聚合（仅 @EsNested 字段）：进入子文档作用域后计算子聚合。
+     * 子聚合的 lambda 用子实体类型（如 Sku::getQuantity），字段自动加 nested path 前缀；
+     * 结果经 {@link EsAggResult#nested(String)} 取单桶（docCount + 子聚合值）。
+     */
+    public static <T> EsAgg nested(SFunction<T, ?> col, EsAgg... children) {
+        EsAgg agg = new EsAgg(Type.NESTED, LambdaUtils.propertyName(col));
+        if (children != null && children.length > 0) {
+            agg.children.addAll(Arrays.asList(children));
+        }
+        return agg;
+    }
+
+    /**
+     * 取前 N 条文档（top_hits），按给定列降序（典型「每组最新/最热」），可作顶层或桶内子聚合。
+     * 无属性概念，默认聚合名 topHits，多个时用 {@link #as(String)} 区分。
+     * 结果经 {@link EsAggResult#hits(String, Class)} 反序列化为实体。
+     */
+    @SafeVarargs
+    public static <T> EsAgg topHits(int size, SFunction<T, ?>... sortCols) {
+        return topHitsInternal(size, false, sortCols);
+    }
+
+    /** 同 {@link #topHits(int, SFunction[])}，按给定列升序 */
+    @SafeVarargs
+    public static <T> EsAgg topHitsAsc(int size, SFunction<T, ?>... sortCols) {
+        return topHitsInternal(size, true, sortCols);
+    }
+
+    @SafeVarargs
+    private static <T> EsAgg topHitsInternal(int size, boolean asc, SFunction<T, ?>... sortCols) {
+        if (size <= 0) {
+            throw new IllegalArgumentException("topHits size 必须为正整数，实际 " + size);
+        }
+        EsAgg agg = new EsAgg(Type.TOP_HITS, null);
+        agg.topSize = size;
+        for (SFunction<T, ?> col : sortCols) {
+            agg.topSorts.add(new TopSort(LambdaUtils.propertyName(col), asc));
+        }
+        return agg;
+    }
+
     /** 显式命名聚合结果（默认为属性名） */
     public EsAgg as(String name) {
         this.name = name;
+        return this;
+    }
+
+    /**
+     * terms 分桶返回条数（对应 ES terms 聚合 size，默认 100）。
+     * 仅 TERMS 类型聚合可调用；高基数字段需要更多桶时显式调大。
+     */
+    public EsAgg size(int size) {
+        if (type != Type.TERMS) {
+            throw new IllegalArgumentException("size 仅适用于 terms 聚合，当前类型: " + type);
+        }
+        if (size <= 0) {
+            throw new IllegalArgumentException("size 必须为正整数，实际 " + size);
+        }
+        this.size = size;
+        return this;
+    }
+
+    /** 日期分桶 key 的格式化提示（仅 dateHistogram；key 本身仍为 epoch 毫秒） */
+    public EsAgg format(String format) {
+        if (type != Type.DATE_HISTOGRAM) {
+            throw new IllegalArgumentException("format 仅适用于 dateHistogram 聚合，当前类型: " + type);
+        }
+        this.dateFormat = format;
+        return this;
+    }
+
+    /** 日期分桶最小文档数（仅 dateHistogram；0 时数据区间内的空时间桶也返回） */
+    public EsAgg minDocCount(int minDocCount) {
+        if (type != Type.DATE_HISTOGRAM) {
+            throw new IllegalArgumentException("minDocCount 仅适用于 dateHistogram 聚合，当前类型: " + type);
+        }
+        if (minDocCount < 0) {
+            throw new IllegalArgumentException("minDocCount 不能为负数，实际 " + minDocCount);
+        }
+        this.dateMinDocCount = minDocCount;
         return this;
     }
 
@@ -80,8 +204,61 @@ public class EsAgg {
         return this;
     }
 
+    /**
+     * terms 分桶排序（仅 terms 可用）：metric 支持 "_count"（文档数）/ "_key"（桶键）/
+     * 子聚合名（如 "avgPrice"，必须已通过 {@link #subAgg(EsAgg...)} 挂载，否则执行时报错）。
+     */
+    public EsAgg orderBy(String metric, boolean desc) {
+        if (type != Type.TERMS) {
+            throw new IllegalArgumentException("orderBy 仅适用于 terms 聚合，当前类型: " + type);
+        }
+        if (metric == null || metric.isBlank()) {
+            throw new IllegalArgumentException("orderBy 的 metric 不能为空");
+        }
+        this.orderMetric = metric;
+        this.orderDesc = desc;
+        return this;
+    }
+
     public Type getType() {
         return type;
+    }
+
+    /** terms 分桶上限（未设置时由执行侧用默认 100） */
+    public Integer getSize() {
+        return size;
+    }
+
+    public String getDateInterval() {
+        return dateInterval;
+    }
+
+    public List<EsAggRange> getRanges() {
+        return ranges;
+    }
+
+    public String getDateFormat() {
+        return dateFormat;
+    }
+
+    public Integer getDateMinDocCount() {
+        return dateMinDocCount;
+    }
+
+    public Integer getTopSize() {
+        return topSize;
+    }
+
+    public List<TopSort> getTopSorts() {
+        return topSorts;
+    }
+
+    public String getOrderMetric() {
+        return orderMetric;
+    }
+
+    public Boolean getOrderDesc() {
+        return orderDesc;
     }
 
     public String getProperty() {
@@ -93,6 +270,9 @@ public class EsAgg {
     }
 
     public String getName() {
-        return name != null ? name : property;
+        if (name != null) {
+            return name;
+        }
+        return property != null ? property : "topHits";
     }
 }

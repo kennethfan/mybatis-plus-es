@@ -2,6 +2,7 @@ package io.github.kennethfan.mpes.sample;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import io.github.kennethfan.mpes.agg.EsAgg;
+import io.github.kennethfan.mpes.agg.EsAggRange;
 import io.github.kennethfan.mpes.agg.EsAggResult;
 import io.github.kennethfan.mpes.agg.EsBucket;
 import io.github.kennethfan.mpes.geo.GeoPoint;
@@ -15,6 +16,7 @@ import io.github.kennethfan.mpes.sample.entity.Sku;
 import io.github.kennethfan.mpes.sample.mapper.ProductMapper;
 import io.github.kennethfan.mpes.support.EsOpsException;
 import io.github.kennethfan.mpes.wrapper.EsLambdaQueryWrapper;
+import io.github.kennethfan.mpes.wrapper.EsMultiMatch;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -293,6 +296,287 @@ class ProductMapperIntegrationTest {
 
         // cardinality：三个不同商品名（未 as() 时聚合名默认为属性名）
         assertEquals(3.0, result.value("productName"), 0.001);
+    }
+
+    @Test
+    void termsAggSize() {
+        seedThree();
+
+        // productName 有 3 个不同值：不设 size 时默认 100 → 全量 3 桶
+        assertEquals(3, mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getProductName)).buckets("productName").size());
+
+        // size(2) → 只返回前 2 桶（高基数字段可显式控桶数）
+        assertEquals(2, mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getProductName).size(2)).buckets("productName").size());
+
+        // size 仅 terms 可用，其他类型直接拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAgg.avg(Product::getPrice).size(2));
+        // 非正数拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAgg.terms(Product::getProductName).size(0));
+    }
+
+    // ---------- 查询增强续（九期） ----------
+
+    @Test
+    void multiMatchTypeAndOperator() {
+        seedThree();
+
+        // PHRASE 短语检索：「无线鼠标」在 ID_2 描述中按序出现 → 1 条；乱序「鼠标 无线」→ 0 条
+        assertEquals(1, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch(EsMultiMatch.type(EsMultiMatch.MatchType.PHRASE), "无线鼠标",
+                        Product::getDescription)).size());
+        assertEquals(0, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch(EsMultiMatch.type(EsMultiMatch.MatchType.PHRASE), "鼠标 无线",
+                        Product::getDescription)).size());
+
+        // operatorAnd：默认 OR 时「静音 4K」命中 ID_2 + ID_3 两条；AND 后无一文档同时含两词 → 0 条
+        assertEquals(2, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch("静音 4K", Product::getDescription)).size());
+        assertEquals(0, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch(EsMultiMatch.type(EsMultiMatch.MatchType.BEST_FIELDS).operatorAnd(),
+                        "静音 4K", Product::getDescription)).size());
+
+        // operatorAnd 命中场景：「静音 无线」均只在 ID_2 描述出现 → 1 条
+        assertEquals(1, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .multiMatch(EsMultiMatch.type(EsMultiMatch.MatchType.BEST_FIELDS).operatorAnd(),
+                        "静音 无线", Product::getDescription)).size());
+    }
+
+    @Test
+    void scriptQuery() {
+        seedThree();
+
+        // 带 params：库存 > 50 → 仅 ID_1（100）
+        var hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .script("doc['stock'].value > params.min", Map.of("min", 50)));
+        assertEquals(1, hits.size());
+        assertEquals(ID_1, hits.get(0).getId());
+
+        // 无 params：库存 >= 50 → ID_1 + ID_2
+        var hits2 = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .script("doc['stock'].value >= 50"));
+        assertEquals(2, hits2.size());
+
+        // 与普通条件组合：script 过滤 + keyword 等值
+        var combined = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .script("doc['stock'].value >= 10")
+                .eq(Product::getOnSale, false));
+        assertEquals(1, combined.size());
+        assertEquals(ID_3, combined.get(0).getId());
+
+        // 空 source 拒绝
+        assertThrows(EsOpsException.class, () -> new EsLambdaQueryWrapper<Product>().script(" "));
+    }
+
+    @Test
+    void collapseDedup() {
+        long id4 = 90004L;
+        try {
+            seedThree();
+            // 再插入一条同名商品（与 ID_1 同 productName）
+            mapper.insert(product(id4, "机械键盘 K870", "客制化机械键盘 茶轴", "459.00", 80, "2026-02-10", true));
+            refresh();
+
+            // 不折叠：同名 2 条
+            assertEquals(2, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                    .eq(Product::getProductName, "机械键盘 K870")).size());
+
+            // collapse 折叠后：每组仅保留 1 条 → 1 条
+            var deduped = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                    .eq(Product::getProductName, "机械键盘 K870")
+                    .collapse(Product::getProductName));
+            assertEquals(1, deduped.size());
+            assertNotNull(deduped.get(0));
+
+            // 全量 collapse：4 条文档去重同名 → 3 条
+            assertEquals(3, mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                    .collapse(Product::getProductName)).size());
+        } finally {
+            mapper.deleteById(id4);
+            refresh();
+        }
+    }
+
+    // ---------- nested 进阶（十期） ----------
+
+    @Test
+    void nestedSort() {
+        seedThree();
+
+        // 无过滤：按 SKU 数量降序 → ID_2(80) → ID_1(60) → ID_3(最大 10)
+        var byQty = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .orderByNested(Product::getSkus, Sku.class, Sku::getQuantity, false));
+        assertEquals(List.of(ID_2, ID_1, ID_3), byQty.stream().map(Product::getId).toList());
+
+        // 带子过滤：仅 spec=4K 的 SKU 参与排序（只有 ID_3 有 4K SKU）→ ID_3 在前，其余 missing 后置
+        var filtered = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .orderByNested(Product::getSkus, Sku.class, Sku::getQuantity, false,
+                        w -> w.eq(Sku::getSpec, "4K")));
+        assertEquals(ID_3, filtered.get(0).getId());
+        assertEquals(3, filtered.size());
+
+        // 非 nested 字段直接拒绝
+        assertThrows(EsOpsException.class, () -> mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .orderByNested(Product::getPrice, Product.class, Product::getPrice, true)));
+    }
+
+    @Test
+    void nestedAgg() {
+        seedThree();
+
+        // nested 桶：共 4 条 SKU 文档（1+1+2）；avg quantity = (60+80+5+10)/4 = 38.75
+        EsAggResult result = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.nested(Product::getSkus, EsAgg.avg(Sku::getQuantity).as("avgQty")));
+        EsBucket bucket = result.nested("skus");
+        assertNull(bucket.getKey());
+        assertEquals(4, bucket.getCount());
+        assertEquals(38.75, bucket.getAggs().value("avgQty"), 0.01);
+
+        // 外层条件过滤父文档（仅下架的 ID_3）：2 条 SKU，max quantity = 10
+        EsAggResult filtered = mapper.aggregate(new EsLambdaQueryWrapper<Product>()
+                        .eq(Product::getOnSale, false),
+                EsAgg.nested(Product::getSkus, EsAgg.max(Sku::getQuantity).as("maxQty")));
+        assertEquals(2, filtered.nested("skus").getCount());
+        assertEquals(10.0, filtered.nested("skus").getAggs().value("maxQty"), 0.01);
+
+        // 非 nested 字段直接拒绝
+        assertThrows(EsOpsException.class, () -> mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.nested(Product::getPrice)));
+    }
+
+    @Test
+    void nestedInnerHits() {
+        seedThree();
+
+        // SKU-C3 命中 → 父 ID_3 + 命中子文档 SKU 实体
+        var hits = mapper.selectListWithNestedHits(new EsLambdaQueryWrapper<Product>()
+                .nested(Product::getSkus, Sku.class, 3, w -> w.eq(Sku::getSkuCode, "SKU-C3")), Sku.class);
+        assertEquals(1, hits.size());
+        assertEquals(ID_3, hits.get(0).entity().getId());
+        assertEquals(1, hits.get(0).hits().size());
+        assertEquals("SKU-C3", hits.get(0).hits().get(0).getSkuCode());
+        assertEquals(5, hits.get(0).hits().get(0).getQuantity());
+
+        // innerHitsSize 限制生效：命中 4K+2K 两个子文档但 size=1 → 每父文档仅 1 条命中
+        var limited = mapper.selectListWithNestedHits(new EsLambdaQueryWrapper<Product>()
+                .nested(Product::getSkus, Sku.class, 1, w -> w.eq(Sku::getSkuCode, "SKU-C3")
+                        .or().eq(Sku::getSkuCode, "SKU-D4")), Sku.class);
+        assertEquals(1, limited.size());
+        assertEquals(1, limited.get(0).hits().size());
+
+        // 无 innerHitsSize 的 nested 条件 → 拒绝
+        assertThrows(EsOpsException.class, () -> mapper.selectListWithNestedHits(
+                new EsLambdaQueryWrapper<Product>().nested(Product::getSkus, Sku.class,
+                        w -> w.eq(Sku::getSkuCode, "SKU-A1")), Sku.class));
+    }
+
+    @Test
+    void dateHistogramByMonth() {
+        seedThree();
+
+        // 上线日期跨 2026-01/03/06 三个月：month 分桶默认 minDocCount=0，
+        // 数据区间（1 月~6 月）内空月份也返回 → 6 桶，key 为 epoch 毫秒且升序
+        var buckets = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.dateHistogram(Product::getLaunchDate, "month")).buckets("launchDate");
+        assertEquals(6, buckets.size());
+        for (int i = 1; i < buckets.size(); i++) {
+            assertTrue((Long) buckets.get(i).getKey() > (Long) buckets.get(i - 1).getKey());
+        }
+        // 6 桶中恰 3 个非空，每桶 1 条
+        assertEquals(3, buckets.stream().filter(b -> b.getCount() > 0).count());
+        assertTrue(buckets.stream().allMatch(b -> b.getCount() <= 1));
+
+        // minDocCount(1) 剔除空桶 → 3 桶，每月 1 条
+        var nonEmpty = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.dateHistogram(Product::getLaunchDate, "month").minDocCount(1))
+                .buckets("launchDate");
+        assertEquals(3, nonEmpty.size());
+        assertTrue(nonEmpty.stream().allMatch(b -> b.getCount() == 1));
+
+        // 非法 interval 直接拒绝
+        assertThrows(IllegalArgumentException.class,
+                () -> EsAgg.dateHistogram(Product::getLaunchDate, "fortnight"));
+    }
+
+    @Test
+    void rangeAggByPrice() {
+        seedThree();
+
+        // 价格区间：budget [0,1000) → 键盘+鼠标 2 条；premium [1000,null) → 显示器 1 条
+        var buckets = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.range(Product::getPrice,
+                        EsAggRange.of(0.0, 1000.0).key("budget"),
+                        EsAggRange.of(1000.0, null).key("premium"))).buckets("price");
+
+        assertEquals(2, buckets.size());
+        var budget = buckets.stream().filter(b -> "budget".equals(b.getKey())).findFirst().orElseThrow();
+        var premium = buckets.stream().filter(b -> "premium".equals(b.getKey())).findFirst().orElseThrow();
+        assertEquals(2, budget.getCount());
+        assertEquals(0.0, budget.getFrom(), 0.001);
+        assertEquals(1000.0, budget.getTo(), 0.001);
+        assertEquals(1, premium.getCount());
+        assertEquals(1000.0, premium.getFrom(), 0.001);
+        assertNull(premium.getTo());
+
+        // from >= to 直接拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAggRange.of(1000.0, 0.0));
+        // 双端为空直接拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAggRange.of(null, null));
+    }
+
+    @Test
+    void topHitsPerBucketAndRoot() {
+        seedThree();
+
+        // 桶内 topHits：每组按上线日期取最新 1 条（降序）
+        var result = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getOnSale)
+                        .subAgg(EsAgg.topHits(1, Product::getLaunchDate).as("latest")));
+        var buckets = result.buckets("onSale");
+        var onSale = buckets.stream().filter(b -> Long.valueOf(1L).equals(b.getKey())).findFirst().orElseThrow();
+        var offSale = buckets.stream().filter(b -> Long.valueOf(0L).equals(b.getKey())).findFirst().orElseThrow();
+        // 在售组：ID_2(2026-03-01) 比 ID_1(2026-01-15) 新；下架组仅 ID_3
+        assertEquals(ID_2, onSale.getAggs().hits("latest", Product.class).get(0).getId());
+        assertEquals(ID_3, offSale.getAggs().hits("latest", Product.class).get(0).getId());
+
+        // 顶层 topHits：全场价格最高 2 条（price 降序）
+        var top2 = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.topHits(2, Product::getPrice)).hits("topHits", Product.class);
+        assertEquals(List.of(ID_3, ID_1), top2.stream().map(Product::getId).toList());
+
+        // topHitsAsc 升序重载：价格最低 2 条 → 鼠标(129.5) → 键盘(399)
+        var low2 = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.topHitsAsc(2, Product::getPrice)).hits("topHits", Product.class);
+        assertEquals(List.of(ID_2, ID_1), low2.stream().map(Product::getId).toList());
+
+        // size<=0 拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAgg.topHits(0));
+    }
+
+    @Test
+    void termsOrderBySubAgg() {
+        seedThree();
+
+        // 按 avgPrice 降序：下架组(2899) 在前 → 桶序 [0, 1]
+        var buckets = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getOnSale)
+                        .subAgg(EsAgg.avg(Product::getPrice).as("avgPrice"))
+                        .orderBy("avgPrice", true)).buckets("onSale");
+        assertEquals(List.of(0L, 1L), buckets.stream().map(b -> (Long) b.getKey()).toList());
+        assertEquals(2899.0, buckets.get(0).getAggs().value("avgPrice"), 0.01);
+
+        // 按 _count 降序：在售组(2 条) 在前 → 桶序 [1, 0]
+        var byCount = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getOnSale).orderBy("_count", true)).buckets("onSale");
+        assertEquals(List.of(1L, 0L), byCount.stream().map(b -> (Long) b.getKey()).toList());
+
+        // 引用不存在的子聚合 → 执行前直接报错（防 ES 静默失败）
+        assertThrows(EsOpsException.class, () -> mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getOnSale).orderBy("nope", true)));
+
+        // 非 terms 聚合调用 orderBy 直接拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAgg.avg(Product::getPrice).orderBy("_count", true));
     }
 
     // ---------- 嵌套子聚合 ----------
@@ -562,5 +846,67 @@ class ProductMapperIntegrationTest {
                 .nested(Product::getSkus, Sku.class, w -> w.eq(Sku::getSkuCode, "SKU-B2")));
         assertEquals(1, both.size());
         assertEquals(ID_2, both.get(0).getId());
+    }
+
+    // ---------- limit 与上限保护 ----------
+
+    @Test
+    void limitClause() {
+        seedThree();
+
+        // limit(2)：3 条命中只取前 2 条
+        List<Product> limited = mapper.selectList(new EsLambdaQueryWrapper<Product>().limit(2));
+        assertEquals(2, limited.size());
+
+        // limit 与条件组合：在售 2 条 + limit(1) → 1 条
+        List<Product> filtered = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .eq(Product::getOnSale, true)
+                .limit(1));
+        assertEquals(1, filtered.size());
+
+        // selectHighlighted 同样生效：limit(1) 只返回 1 条高亮
+        List<EsHit<Product>> hits = mapper.selectHighlighted(
+                new EsLambdaQueryWrapper<Product>().match(Product::getDescription, "键盘").limit(1),
+                EsHighlight.of(Product::getDescription));
+        assertEquals(1, hits.size());
+    }
+
+    @Test
+    void limitValidation() {
+        // 非正数 → 构建时报错
+        assertThrows(EsOpsException.class, () -> new EsLambdaQueryWrapper<Product>().limit(0));
+        // 超出 from+size 窗口上限 10000 → 构建时报错并提示深分页
+        assertThrows(EsOpsException.class, () -> new EsLambdaQueryWrapper<Product>().limit(20000));
+    }
+
+    @Test
+    void selectListOverCapThrows() {
+        long baseId = 99000L;
+        int total = 1001;
+        try {
+            // 写入 1001 条（超出默认上限 1000）
+            List<Product> batch = new java.util.ArrayList<>();
+            for (int i = 1; i <= total; i++) {
+                batch.add(product(baseId + i, "批量商品 " + i, "压测数据 " + i,
+                        "1.00", 1, "2026-01-01", true));
+            }
+            assertEquals(total, mapper.insertBatch(batch));
+            refresh();
+
+            // 未显式 limit 且命中 1001 > 1000 → 显式报错而非静默截断
+            EsOpsException ex = assertThrows(EsOpsException.class,
+                    () -> mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                            .gt(Product::getId, baseId)));
+            assertTrue(ex.getMessage().contains("超过单次上限 1000"));
+
+            // 显式 limit(1001) → 视为已知规模，正常返回全部
+            List<Product> all = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                    .gt(Product::getId, baseId)
+                    .limit(1001));
+            assertEquals(total, all.size());
+        } finally {
+            mapper.delete(new EsLambdaQueryWrapper<Product>().gt(Product::getId, baseId));
+            refresh();
+        }
     }
 }

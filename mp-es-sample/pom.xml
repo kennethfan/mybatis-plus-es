@@ -7,16 +7,19 @@
     <parent>
         <groupId>io.github.kennethfan</groupId>
         <artifactId>mybatis-plus-es</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>0.1.0</version>
     </parent>
 
     <artifactId>mp-es-sample</artifactId>
     <name>mp-es-sample</name>
     <description>mp-es-core 的示例应用：Product 实体 + 集成测试</description>
 
-    <!-- 示例应用不发布到 Maven 仓库（仅 core 发布） -->
+    <!-- 示例应用不发布到 Maven 仓库（仅 core 发布）；release profile 继承到本模块时跳过 sources/javadoc/gpg -->
     <properties>
         <maven.deploy.skip>true</maven.deploy.skip>
+        <maven.source.skip>true</maven.source.skip>
+        <maven.javadoc.skip>true</maven.javadoc.skip>
+        <gpg.skip>true</gpg.skip>
     </properties>
 
     <dependencies>

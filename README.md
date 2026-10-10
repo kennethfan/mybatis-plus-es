@@ -200,7 +200,19 @@ List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
 - **AND 优先级高于 OR**：`eq(1).or().eq(2).eq(3)` → `(1 OR 2) AND 3`；嵌套分组用 `and(w -> ...) / or(w -> ...)`
 - **wrapper 可传 null**：`selectCount(null)` / `selectPage(page, null)` 即全量语义（match_all）
 - 分页为 `from+size`，超出 10000 抛异常；**search_after** 无窗口限制（每批上限 10000，强制追加主键字段兜底排序保证全序，`_id` 禁止 fielddata 排序故用 `_source` 主键）
-- `selectList` 全量上限 1000 条；`selectOne` 命中多条直接抛异常（不静默取首条）
+- **limit(n) 控制返回条数**：`wrapper.limit(n)` 对 selectList / selectHighlighted 生效（上限 10000，超出提示改用 search_after）；未设置时默认取 1000 条，且**命中数超过 1000 直接报错**（不做静默截断，报错信息含总命中数）
+- **terms 聚合桶数可配**：`EsAgg.terms(col).size(n)` 显式指定分桶返回条数（仅 terms 可用，默认 100）；高基数字段聚合被截桶时调大即可
+- **date_histogram 时间分桶**：`EsAgg.dateHistogram(col, "month")`（second/minute/hour/day/week/month/quarter/year），可链式 `.format(...)` / `.minDocCount(n)`；**ES 默认 minDocCount=0**（数据区间内空时间桶也返回），只要非空桶传 `.minDocCount(1)`；桶 key 为 epoch 毫秒（Long）
+- **range 数值区间分桶**：`EsAgg.range(col, EsAggRange.of(0.0, 1000.0).key("budget"), ...)`，端点可空（null = 开区间，from ≥ to 拒绝）；桶 key 为区间命名（未命名时自动「from-to」串），边界经 `bucket.getFrom()/getTo()` 取
+- **top_hits 桶内/顶层取文档**：`EsAgg.topHits(size, cols...)`（降序）/ `topHitsAsc(...)`（升序），默认聚合名 topHits，多个时 `.as()` 区分；结果经 `EsAggResult.hits(name, Entity.class)` 反序列化为实体，terms 桶内经 `bucket.getAggs().hits(...)` 取
+- **terms 分桶排序**：`EsAgg.terms(col).orderBy(metric, desc)`，metric 支持 `_count` / `_key` / 子聚合名（须已 subAgg 挂载，否则执行前报错）
+- **multi_match type/operator 可配**：`multiMatch(EsMultiMatch.type(MatchType.MOST_FIELDS).operatorAnd(), value, cols...)`，五型（BEST_FIELDS/MOST_FIELDS/CROSS_FIELDS/PHRASE/PHRASE_PREFIX）+ AND/OR + minimumShouldMatch；PHRASE 系仅 text 字段；原两个重载（默认 best_fields）行为不变
+- **script 过滤**：`wrapper.script("doc['stock'].value > params.min", Map.of("min", 50))`（params 可空），painless filter context 不打分，可与普通条件组合；source 为用户自写脚本，注入风险自担
+- **collapse 字段去重**：`wrapper.collapse(col)` 仅 selectList 生效（ES 限制 keyword/数值字段），每组保留排序最优 1 条；selectCount 不受影响（ES total 为折叠前命中数）
+- **nested 排序**：`wrapper.orderByNested(nestedCol, Child.class, Child::getField, asc)`，可带子过滤重载（仅过滤命中的子文档参与排序）；字段须为 @EsNested
+- **nested 聚合**：`EsAgg.nested(nestedCol, EsAgg.avg(Child::getField)...)`——子聚合 lambda 用子实体类型，字段自动加 path 前缀；结果经 `EsAggResult.nested(name)` 取单桶（count=nested 文档数，子聚合经 bucket.getAggs() 取）
+- **nested inner_hits**：`wrapper.nested(col, Child.class, size, w -> ...)`（size = 每父文档最多返回的命中子文档数）+ `mapper.selectListWithNestedHits(wrapper, Child.class)` → `NestedHit<T,C>`（entity 父实体 + hits 命中子文档）；wrapper 内最多一个带 innerHitsSize 的 nested 条件
+- `selectOne` 命中多条直接抛异常（不静默取首条）
 - `deleteBatchIds` / `deleteByQuery` 使用 `conflicts=proceed`：删除目标刚被更新时跳过该条而非整体 409 失败
 - 主键（@TableId）同时作为 ES 文档 `_id` 与 `_source` 字段
 - ES 字段名默认 = 属性名原样（camelCase），无隐式下划线转换
@@ -231,12 +243,28 @@ mvn clean verify            # 单元测试无需 ES；集成测试在 ES 未启�
 
 GitHub Actions（[.github/workflows/ci.yml](.github/workflows/ci.yml)）：push 到 main / PR 触发，JDK 17 + `services` 起 ES 8.19.0 容器（healthcheck 等待就绪），执行 `mvn verify` 全量验证——与本地验证语义一致。
 
-## 发布（Maven Central 准备）
+## 发布（Maven Central）
 
-发布元数据已就位（licenses / developers / scm / distributionManagement → Central Portal，License Apache-2.0）。实际发布步骤（需要 Central Portal 账号与 GPG 密钥，另行操作）：
+发布元数据已就位（licenses / developers / scm，License Apache-2.0）。**打 tag 自动发布**：
 
 ```bash
-mvn -Prelease deploy        # -Prelease 激活 sources + javadoc + gpg 签名；仅 mp-es-core 发布（sample 已 skip deploy）
+git tag v0.2.0 && git push origin v0.2.0
+# GitHub Actions（.github/workflows/release.yml）自动：
+#   标签名 → 版本号（versions:set 全模块替换）→ GPG 签名 → Central 上传 → autoPublish 自动发布 → 建 GitHub Release
+```
+
+前置 secrets（仓库 Settings → Secrets and variables → Actions）：
+
+| Secret | 内容 |
+|---|---|
+| `GPG_PRIVATE_KEY` | `gpg --armor --export-secret-keys <指纹>` 的完整输出 |
+| `GPG_PASSPHRASE` | GPG 密钥口令 |
+| `MAVEN_CENTRAL_USERNAME` / `MAVEN_CENTRAL_PASSWORD` | Central Portal 的 User Token |
+
+本地手动发布（等价路径，需要 `~/.m2/settings.xml` 配 `id=central` 的 token）：
+
+```bash
+mvn -Prelease deploy        # sources + javadoc + gpg 签名 + Central 上传，仅 mp-es-core 发布
 ```
 
 发布校验（无需账号，本地可跑）：
@@ -257,13 +285,14 @@ mvn -B -ntp javadoc:javadoc -pl mp-es-core   # Javadoc 可生成（质量门槛�
 | 四期 | 条件删除（delete）、条件更新（update + painless script）、批量部分更新（updateBatchById） |
 | 五期 | 查询增强：multiMatch、fuzzy、prefix、boost 权重 |
 | 六期 | 工程化：GitHub Actions CI、Javadoc 质量门槛、Maven Central 发布准备 |
+| 七期 | 上限与可控性：limit(n) 返回条数控制、selectList 超 1000 显式报错、terms 聚合 size 可配 |
+| 八期 | 聚合扩展：date_histogram、range、top_hits（含 Asc 重载）、terms 分桶排序（orderBy sub-agg） |
+| 九期 | 查询增强续：multi_match type/operator 可配（EsMultiMatch）、script 过滤、collapse 去重 |
+| 十期 | nested 进阶：nested 排序（含子过滤）、nested 聚合、inner_hits（selectListWithNestedHits） |
 
 **候选方向**（按需排期，欢迎提 issue 讨论）
 
 | 方向 | 内容 |
 |---|---|
 | 索引运维 | alias 切换、reindex 重建 mapping、索引模板——解决「改实体必须删索引」的痛点 |
-| nested 进阶 | nested 排序（NestedSortValue）、nested 聚合、inner_hits（返回命中的子文档） |
-| 聚合扩展 | date_histogram、range、top_hits、分桶排序（order by sub-agg） |
-| 查询增强续 | multi_match 的 type/operator 配置、script 查询、collapse 去重 |
-| 发布落地 | Maven Central 实际发布（需 Central Portal 账号 + GPG） |
+| 发布落地 | **进行中**：发布链路已就绪（central-publishing-maven-plugin + tag 触发 CI），待 Central Portal secrets 配置与首次发布 |

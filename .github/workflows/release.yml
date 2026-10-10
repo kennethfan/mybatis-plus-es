@@ -1,0 +1,82 @@
+name: Release
+
+# 打 vX.Y.Z 标签自动发布到 Maven Central：
+# 标签名 → 版本号（versions:set 批量替换）→ GPG 签名 → Central Portal 上传（autoPublish 自动发布）
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag 必须为 vX.Y.Z 形式，实际: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "发布版本: $VERSION"
+
+      - name: Replace Maven version
+        run: >-
+          mvn -B -ntp versions:set
+          -DnewVersion=${{ steps.version.outputs.version }}
+          -DprocessAllModules
+          -DgenerateBackupPoms=false
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          echo "3AFBBA549FBCE613A53C906840E0F8A1B9B2897E:6:" | gpg --import-ownertrust
+
+      - name: Configure Central credentials
+        env:
+          CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<SETTINGS_EOF
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+            <servers>
+              <server>
+                <id>central</id>
+                <username>${CENTRAL_USERNAME}</username>
+                <password>${CENTRAL_PASSWORD}</password>
+              </server>
+            </servers>
+          </settings>
+          SETTINGS_EOF
+
+      - name: Publish to Maven Central
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: >-
+          mvn -B -ntp -Prelease deploy
+          "-Dgpg.keyname=3AFBBA549FBCE613A53C906840E0F8A1B9B2897E"
+          "-Dgpg.passphrase=$GPG_PASSPHRASE"
+          "-Dgpg.pinentryMode=loopback"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

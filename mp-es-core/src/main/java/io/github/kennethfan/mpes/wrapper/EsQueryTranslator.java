@@ -3,7 +3,9 @@ package io.github.kennethfan.mpes.wrapper;
 import co.elastic.clients.elasticsearch._types.FieldValue;
 import co.elastic.clients.elasticsearch._types.SortOptions;
 import co.elastic.clients.elasticsearch._types.SortOrder;
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import co.elastic.clients.json.JsonData;
 import io.github.kennethfan.mpes.geo.GeoPoint;
 import io.github.kennethfan.mpes.metadata.EntityMetadata;
@@ -12,6 +14,7 @@ import io.github.kennethfan.mpes.support.EsOpsException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 /**
@@ -51,6 +54,8 @@ public final class EsQueryTranslator {
                 q = multiMatchQuery(mm, resolver, prefix);
             } else if (node.content() instanceof EsLambdaQueryWrapper.NestedLeaf nested) {
                 q = nestedQuery(nested, resolver, prefix);
+            } else if (node.content() instanceof EsLambdaQueryWrapper.ScriptLeaf script) {
+                q = scriptQuery(script);
             } else {
                 q = toQuery((EsLambdaQueryWrapper<?>) node.content(), resolver, prefix);
             }
@@ -155,13 +160,46 @@ public final class EsQueryTranslator {
                 .map(p -> prefix + resolver.apply(p).getEsFieldName())
                 .toList();
         Float boost = mm.boost();
+        EsMultiMatch options = mm.options();
         return Query.of(q -> q.multiMatch(m -> {
             m.fields(fields).query(String.valueOf(mm.value()));
             if (boost != null) {
                 m.boost(boost);
             }
+            if (options != null) {
+                // ES 枚举常量为驼峰（BestFields/PhrasePrefix），按名映射
+                m.type(TextQueryType.valueOf(toEnumName(options.type().name())));
+                if (options.operator() == EsMultiMatch.Operator.AND) {
+                    m.operator(Operator.And);
+                }
+                if (options.minimumShouldMatch() != null) {
+                    m.minimumShouldMatch(options.minimumShouldMatch());
+                }
+            }
             return m;
         }));
+    }
+
+    /** UPPER_SNAKE → UpperCamel（BEST_FIELDS → BestFields），用于映射 ES 枚举常量 */
+    private static String toEnumName(String name) {
+        StringBuilder sb = new StringBuilder();
+        for (String part : name.split("_")) {
+            sb.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1).toLowerCase());
+        }
+        return sb.toString();
+    }
+
+    /** script 过滤：painless source + params（JsonData 包装），filter context */
+    private static Query scriptQuery(EsLambdaQueryWrapper.ScriptLeaf script) {
+        return Query.of(q -> q.script(s -> s.script(sc -> {
+            sc.source(script.source());
+            if (!script.params().isEmpty()) {
+                Map<String, JsonData> params = new java.util.LinkedHashMap<>();
+                script.params().forEach((k, v) -> params.put(k, JsonData.of(v)));
+                sc.params(params);
+            }
+            return sc;
+        })));
     }
 
     /** nested 子文档条件：path 为 nested 字段的完整路径，内部用子实体元数据递归翻译（字段带 path 前缀） */
@@ -173,9 +211,14 @@ public final class EsQueryTranslator {
         }
         String path = prefix + fm.getEsFieldName();
         Query inner = toQuery(nested.inner(), fm.getNestedMetadata()::fieldByProperty, path + ".");
-        return Query.of(q -> q.nested(n -> n
-                .path(path)
-                .query(inner)));
+        return Query.of(q -> q.nested(n -> {
+            n.path(path).query(inner);
+            if (nested.innerHitsSize() != null) {
+                // inner_hits 显式命名为 nested path（含前缀），供解析端按名取回
+                n.innerHits(ih -> ih.name(path).size(nested.innerHitsSize()));
+            }
+            return n;
+        }));
     }
 
     private static void rejectText(boolean isText, String field, String suggestion) {
@@ -219,6 +262,29 @@ public final class EsQueryTranslator {
                     .field(field)
                     .location(l -> l.latlon(ll -> ll.lat(origin.getLat()).lon(origin.getLon())))
                     .order(order))));
+        }
+        for (EsLambdaQueryWrapper.NestedSortSpec s : wrapper.getNestedSorts()) {
+            FieldMetadata fm = resolver.apply(s.property());
+            if (!"nested".equals(fm.getEsType()) || fm.getNestedMetadata() == null) {
+                throw new EsOpsException("字段 " + fm.getEsFieldName()
+                        + " 不是 nested 类型（@EsNested），不能使用 orderByNested");
+            }
+            String path = fm.getEsFieldName();
+            String sortField = path + "."
+                    + fm.getNestedMetadata().fieldByProperty(s.sortProperty()).getEsFieldName();
+            SortOrder order = s.asc() ? SortOrder.Asc : SortOrder.Desc;
+            EsLambdaQueryWrapper<?> filter = s.filter();
+            result.add(SortOptions.of(so -> so.field(f -> {
+                f.field(sortField).order(order)
+                        .nested(n -> {
+                            n.path(path);
+                            if (filter != null && !filter.isEmpty()) {
+                                n.filter(toQuery(filter, fm.getNestedMetadata()::fieldByProperty, path + "."));
+                            }
+                            return n;
+                        });
+                return f;
+            })));
         }
         return result;
     }

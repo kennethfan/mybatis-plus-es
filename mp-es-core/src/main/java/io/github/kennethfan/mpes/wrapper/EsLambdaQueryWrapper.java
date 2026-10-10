@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -27,6 +28,9 @@ import java.util.function.Consumer;
  */
 public class EsLambdaQueryWrapper<T> {
 
+    /** ES from+size 分页窗口上限（index.max_result_window 默认值） */
+    public static final int MAX_RESULT_WINDOW = 10_000;
+
     enum Op { EQ, NE, IN, GT, GE, LT, LE, BETWEEN, LIKE, MATCH, IS_NULL, GEO_DISTANCE, FUZZY, PREFIX }
 
     /**
@@ -36,16 +40,22 @@ public class EsLambdaQueryWrapper<T> {
      */
     record Leaf(Op op, String property, List<Object> values, Float boost) {}
 
-    /** multi_match 条件：跨多字段分词检索（best_fields），boost 可空 */
-    record MultiMatchLeaf(List<String> properties, Object value, Float boost) {}
+    /** multi_match 条件：跨多字段分词检索，boost 与 type/operator 等 options 均可空 */
+    record MultiMatchLeaf(List<String> properties, Object value, Float boost, EsMultiMatch options) {}
 
-    /** nested 子文档条件：属性名 + 作用于子实体类型的子 Wrapper */
-    record NestedLeaf(String property, EsLambdaQueryWrapper<?> inner) {}
+    /** nested 子文档条件：属性名 + 作用于子实体类型的子 Wrapper + innerHits 返回条数（可空 = 不取命中子文档） */
+    record NestedLeaf(String property, EsLambdaQueryWrapper<?> inner, Integer innerHitsSize) {}
+
+    /** script 过滤条件：painless source + 参数（filter context，不打分） */
+    record ScriptLeaf(String source, Map<String, Object> params) {}
 
     record SortSpec(String property, boolean asc) {}
 
     /** geo_distance 排序：以 origin 为基准按距离升/降序 */
     record GeoDistanceSortSpec(String property, GeoPoint origin, boolean asc) {}
+
+    /** nested 排序：按子文档字段排序父文档（可带子过滤） */
+    record NestedSortSpec(String property, String sortProperty, boolean asc, EsLambdaQueryWrapper<?> filter) {}
 
     /** 条件节点：orToPrevious 表示与前一节点以 OR 连接；content 为 Leaf 或嵌套 Wrapper（分组） */
     record Node(boolean orToPrevious, Object content) {}
@@ -58,6 +68,17 @@ public class EsLambdaQueryWrapper<T> {
 
     @Getter
     private final List<GeoDistanceSortSpec> geoSorts = new ArrayList<>();
+
+    @Getter
+    private final List<NestedSortSpec> nestedSorts = new ArrayList<>();
+
+    /** 返回条数上限（仅 selectList / selectHighlighted 生效），null 表示未显式指定 */
+    @Getter
+    private Integer limit;
+
+    /** 字段折叠（collapse，仅 selectList 生效）：按字段值去重，每组保留排序最优 1 条 */
+    @Getter
+    private String collapseProperty;
 
     private boolean pendingOr;
 
@@ -117,20 +138,32 @@ public class EsLambdaQueryWrapper<T> {
 
     /** 跨多字段分词检索（multi_match，默认 best_fields） */
     public EsLambdaQueryWrapper<T> multiMatch(Object value, SFunction<T, ?>... cols) {
-        return multiMatchInternal(null, value, cols);
+        return multiMatchInternal(null, null, value, cols);
     }
 
     /** 跨多字段分词检索（带权重 boost） */
     public EsLambdaQueryWrapper<T> multiMatch(float boost, Object value, SFunction<T, ?>... cols) {
-        return multiMatchInternal(boost, value, cols);
+        return multiMatchInternal(null, boost, value, cols);
     }
 
-    private EsLambdaQueryWrapper<T> multiMatchInternal(Float boost, Object value, SFunction<T, ?>... cols) {
+    /** 跨多字段分词检索（自定义 type/operator 等，见 {@link EsMultiMatch}） */
+    public EsLambdaQueryWrapper<T> multiMatch(EsMultiMatch options, Object value, SFunction<T, ?>... cols) {
+        return multiMatchInternal(options, null, value, cols);
+    }
+
+    /** 跨多字段分词检索（自定义配置 + 权重 boost） */
+    public EsLambdaQueryWrapper<T> multiMatch(EsMultiMatch options, float boost, Object value,
+                                              SFunction<T, ?>... cols) {
+        return multiMatchInternal(options, boost, value, cols);
+    }
+
+    private EsLambdaQueryWrapper<T> multiMatchInternal(EsMultiMatch options, Float boost, Object value,
+                                                       SFunction<T, ?>... cols) {
         if (cols == null || cols.length == 0) {
             throw new EsOpsException("multiMatch 至少需要一个字段");
         }
         List<String> props = Arrays.stream(cols).map(LambdaUtils::propertyName).toList();
-        nodes.add(new Node(pendingOr, new MultiMatchLeaf(props, value, boost)));
+        nodes.add(new Node(pendingOr, new MultiMatchLeaf(props, value, boost, options)));
         pendingOr = false;
         return this;
     }
@@ -170,7 +203,24 @@ public class EsLambdaQueryWrapper<T> {
                                               Consumer<EsLambdaQueryWrapper<C>> consumer) {
         EsLambdaQueryWrapper<C> sub = new EsLambdaQueryWrapper<>();
         consumer.accept(sub);
-        nodes.add(new Node(pendingOr, new NestedLeaf(LambdaUtils.propertyName(col), sub)));
+        nodes.add(new Node(pendingOr, new NestedLeaf(LambdaUtils.propertyName(col), sub, null)));
+        pendingOr = false;
+        return this;
+    }
+
+    /**
+     * nested 子文档条件 + inner_hits（返回每个父文档命中的子文档，最多 innerHitsSize 条）。
+     * 配合 {@code mapper.selectListWithNestedHits(wrapper, Child.class)} 使用；
+     * wrapper 内最多一个带 innerHitsSize 的 nested 条件。
+     */
+    public <C> EsLambdaQueryWrapper<T> nested(SFunction<T, ?> col, Class<C> childType, int innerHitsSize,
+                                              Consumer<EsLambdaQueryWrapper<C>> consumer) {
+        if (innerHitsSize <= 0) {
+            throw new EsOpsException("innerHitsSize 必须为正整数，实际 " + innerHitsSize);
+        }
+        EsLambdaQueryWrapper<C> sub = new EsLambdaQueryWrapper<>();
+        consumer.accept(sub);
+        nodes.add(new Node(pendingOr, new NestedLeaf(LambdaUtils.propertyName(col), sub, innerHitsSize)));
         pendingOr = false;
         return this;
     }
@@ -179,6 +229,24 @@ public class EsLambdaQueryWrapper<T> {
     public EsLambdaQueryWrapper<T> or() {
         pendingOr = true;
         return this;
+    }
+
+    /**
+     * script 过滤（painless，filter context 不打分），可与普通条件任意组合。
+     * source 为用户自写脚本（如 "doc['stock'].value > params.min"），注入风险自担。
+     */
+    public EsLambdaQueryWrapper<T> script(String source, Map<String, Object> params) {
+        if (source == null || source.isBlank()) {
+            throw new EsOpsException("script source 不能为空");
+        }
+        nodes.add(new Node(pendingOr, new ScriptLeaf(source, params == null ? Map.of() : params)));
+        pendingOr = false;
+        return this;
+    }
+
+    /** script 过滤（无参数） */
+    public EsLambdaQueryWrapper<T> script(String source) {
+        return script(source, Map.of());
     }
 
     /** 嵌套分组，组内条件与组外以 AND 连接 */
@@ -196,7 +264,35 @@ public class EsLambdaQueryWrapper<T> {
         return this;
     }
 
+    // ---------- 返回条数 ----------
+
+    /**
+     * 限制返回条数（对应 ES size），仅 selectList / selectHighlighted 生效。
+     * 未设置时默认取 1000 条，且命中数超过 1000 将直接报错（不做静默截断）；
+     * 需要更多结果时用本方法（上限 {@value #MAX_RESULT_WINDOW}）或改用 selectAfter 深分页。
+     */
+    public EsLambdaQueryWrapper<T> limit(int n) {
+        if (n <= 0) {
+            throw new EsOpsException("limit 必须为正整数，实际 " + n);
+        }
+        if (n > MAX_RESULT_WINDOW) {
+            throw new EsOpsException("limit 超出 ES from+size 窗口上限 " + MAX_RESULT_WINDOW
+                    + "（实际 " + n + "），请改用 selectAfter 深分页");
+        }
+        this.limit = n;
+        return this;
+    }
+
     // ---------- 排序 ----------
+
+    /**
+     * 字段折叠去重（collapse，仅 selectList 生效；ES 限制仅 keyword/数值字段）。
+     * 每个字段值只保留排序最优的一条；selectCount 不受影响（ES total 为折叠前命中数）。
+     */
+    public EsLambdaQueryWrapper<T> collapse(SFunction<T, ?> col) {
+        this.collapseProperty = LambdaUtils.propertyName(col);
+        return this;
+    }
 
     @SafeVarargs
     public final EsLambdaQueryWrapper<T> orderByAsc(SFunction<T, ?>... cols) {
@@ -218,6 +314,44 @@ public class EsLambdaQueryWrapper<T> {
     public EsLambdaQueryWrapper<T> orderByGeoDistance(SFunction<T, ?> col, GeoPoint origin, boolean asc) {
         geoSorts.add(new GeoDistanceSortSpec(LambdaUtils.propertyName(col), origin, asc));
         return this;
+    }
+
+    /** nested 子文档字段排序（仅用于 @EsNested 字段），无子过滤 */
+    public <C> EsLambdaQueryWrapper<T> orderByNested(SFunction<T, ?> nestedCol, Class<C> childType,
+                                                     SFunction<C, ?> sortCol, boolean asc) {
+        return orderByNested(nestedCol, childType, sortCol, asc, null);
+    }
+
+    /**
+     * nested 子文档字段排序（仅用于 @EsNested 字段），可带子过滤条件：
+     * 仅 filter 命中的子文档参与排序（如「spec=4K 的 SKU 按数量降序」）。
+     */
+    public <C> EsLambdaQueryWrapper<T> orderByNested(SFunction<T, ?> nestedCol, Class<C> childType,
+                                                     SFunction<C, ?> sortCol, boolean asc,
+                                                     Consumer<EsLambdaQueryWrapper<C>> filter) {
+        EsLambdaQueryWrapper<C> sub = null;
+        if (filter != null) {
+            sub = new EsLambdaQueryWrapper<>();
+            filter.accept(sub);
+        }
+        nestedSorts.add(new NestedSortSpec(LambdaUtils.propertyName(nestedCol),
+                LambdaUtils.propertyName(sortCol), asc, sub));
+        return this;
+    }
+
+    /** 供执行层使用：wrapper 内带 innerHitsSize 的 nested 条件（属性名 + 返回条数） */
+    public record NestedInnerHits(String property, Integer size) {}
+
+    /** inner_hits 配置：selectListWithNestedHits 校验「恰有一个」的依据 */
+    public List<NestedInnerHits> getInnerHitsRequests() {
+        return nodes.stream()
+                .map(n -> n.content())
+                .filter(c -> c instanceof NestedLeaf nl && nl.innerHitsSize() != null)
+                .map(c -> {
+                    NestedLeaf nl = (NestedLeaf) c;
+                    return new NestedInnerHits(nl.property(), nl.innerHitsSize());
+                })
+                .toList();
     }
 
     public boolean isEmpty() {

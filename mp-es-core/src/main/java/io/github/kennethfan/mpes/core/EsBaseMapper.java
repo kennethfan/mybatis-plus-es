@@ -53,7 +53,11 @@ public interface EsBaseMapper<T> {
     /** 条件计数，wrapper 为 null 时全量计数 */
     Long selectCount(EsLambdaQueryWrapper<T> wrapper);
 
-    /** 条件查询，wrapper 为 null 时查全量（上限 1000 条） */
+    /**
+     * 条件查询，wrapper 为 null 时查全量。默认上限 1000 条：未显式 {@code wrapper.limit(n)} 时
+     * 命中数超过 1000 直接报错（不做静默截断）；{@code limit(n)} 可放宽至 10000，
+     * 更多结果请用 {@link #selectAfter} 深分页。
+     */
     List<T> selectList(EsLambdaQueryWrapper<T> wrapper);
 
     /** 条件查单条：0 条返回 null，多条抛 {@link io.github.kennethfan.mpes.support.EsOpsException} */
@@ -68,6 +72,12 @@ public interface EsBaseMapper<T> {
     /** 高亮检索：返回实体 + 高亮片段（highlight 中字段需与查询条件配合使用） */
     List<EsHit<T>> selectHighlighted(EsLambdaQueryWrapper<T> wrapper, EsHighlight<T> highlight);
 
-    /** 聚合查询：terms / avg / max / min / sum / stats / cardinality（ES 查询不返回文档，size=0） */
+    /** 聚合查询：terms / avg / max / min / sum / stats / cardinality / date_histogram / range / nested / top_hits（ES 查询不返回文档，size=0） */
     EsAggResult aggregate(EsLambdaQueryWrapper<T> wrapper, EsAgg... aggs);
+
+    /**
+     * nested 检索 + inner_hits：返回父实体与命中的子文档。
+     * 要求 wrapper 恰有一个带 innerHitsSize 的 nested() 条件（如 nested(Product::getSkus, Sku.class, 3, w -> ...)）。
+     */
+    <C> List<NestedHit<T, C>> selectListWithNestedHits(EsLambdaQueryWrapper<T> wrapper, Class<C> childType);
 }
