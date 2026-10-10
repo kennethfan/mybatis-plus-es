@@ -14,6 +14,7 @@ import co.elastic.clients.elasticsearch.core.search.HighlightField;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.core.search.TotalHits;
 import co.elastic.clients.elasticsearch._types.Result;
+import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.json.JsonData;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.kennethfan.mpes.agg.EsAgg;
@@ -605,7 +606,10 @@ public class EsMapperProxy<T> implements InvocationHandler {
     }
 
     private Aggregation toAggregation(EsAgg agg) {
-        String field = metadata.fieldByProperty(agg.getProperty()).getEsFieldName();
+        // top_hits 无属性概念，field 仅对字段类聚合解析
+        String field = agg.getProperty() != null
+                ? metadata.fieldByProperty(agg.getProperty()).getEsFieldName()
+                : null;
         Map<String, Aggregation> sub = new LinkedHashMap<>();
         for (EsAgg child : agg.getChildren()) {
             sub.put(child.getName(), toAggregation(child));
@@ -653,6 +657,15 @@ public class EsMapperProxy<T> implements InvocationHandler {
                 case SUM -> a.sum(v -> v.field(field));
                 case STATS -> a.stats(v -> v.field(field));
                 case CARDINALITY -> a.cardinality(v -> v.field(field));
+                case TOP_HITS -> a.topHits(th -> {
+                    th.size(agg.getTopSize());
+                    for (EsAgg.TopSort sort : agg.getTopSorts()) {
+                        String sortField = metadata.fieldByProperty(sort.property()).getEsFieldName();
+                        th.sort(so -> so.field(f -> f.field(sortField)
+                                .order(sort.asc() ? SortOrder.Asc : SortOrder.Desc)));
+                    }
+                    return th;
+                });
             };
             if (!sub.isEmpty()) {
                 c.aggregations(sub);

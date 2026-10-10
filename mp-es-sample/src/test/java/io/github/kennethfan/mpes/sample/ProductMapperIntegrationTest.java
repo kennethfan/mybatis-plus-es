@@ -368,6 +368,35 @@ class ProductMapperIntegrationTest {
         assertThrows(IllegalArgumentException.class, () -> EsAggRange.of(null, null));
     }
 
+    @Test
+    void topHitsPerBucketAndRoot() {
+        seedThree();
+
+        // 桶内 topHits：每组按上线日期取最新 1 条（降序）
+        var result = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.terms(Product::getOnSale)
+                        .subAgg(EsAgg.topHits(1, Product::getLaunchDate).as("latest")));
+        var buckets = result.buckets("onSale");
+        var onSale = buckets.stream().filter(b -> Long.valueOf(1L).equals(b.getKey())).findFirst().orElseThrow();
+        var offSale = buckets.stream().filter(b -> Long.valueOf(0L).equals(b.getKey())).findFirst().orElseThrow();
+        // 在售组：ID_2(2026-03-01) 比 ID_1(2026-01-15) 新；下架组仅 ID_3
+        assertEquals(ID_2, onSale.getAggs().hits("latest", Product.class).get(0).getId());
+        assertEquals(ID_3, offSale.getAggs().hits("latest", Product.class).get(0).getId());
+
+        // 顶层 topHits：全场价格最高 2 条（price 降序）
+        var top2 = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.topHits(2, Product::getPrice)).hits("topHits", Product.class);
+        assertEquals(List.of(ID_3, ID_1), top2.stream().map(Product::getId).toList());
+
+        // topHitsAsc 升序重载：价格最低 2 条 → 鼠标(129.5) → 键盘(399)
+        var low2 = mapper.aggregate(new EsLambdaQueryWrapper<Product>(),
+                EsAgg.topHitsAsc(2, Product::getPrice)).hits("topHits", Product.class);
+        assertEquals(List.of(ID_2, ID_1), low2.stream().map(Product::getId).toList());
+
+        // size<=0 拒绝
+        assertThrows(IllegalArgumentException.class, () -> EsAgg.topHits(0));
+    }
+
     // ---------- 嵌套子聚合 ----------
 
     @Test

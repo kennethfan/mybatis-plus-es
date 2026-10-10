@@ -204,6 +204,7 @@ List<Product> hits = mapper.selectList(new EsLambdaQueryWrapper<Product>()
 - **terms 聚合桶数可配**：`EsAgg.terms(col).size(n)` 显式指定分桶返回条数（仅 terms 可用，默认 100）；高基数字段聚合被截桶时调大即可
 - **date_histogram 时间分桶**：`EsAgg.dateHistogram(col, "month")`（second/minute/hour/day/week/month/quarter/year），可链式 `.format(...)` / `.minDocCount(n)`；**ES 默认 minDocCount=0**（数据区间内空时间桶也返回），只要非空桶传 `.minDocCount(1)`；桶 key 为 epoch 毫秒（Long）
 - **range 数值区间分桶**：`EsAgg.range(col, EsAggRange.of(0.0, 1000.0).key("budget"), ...)`，端点可空（null = 开区间，from ≥ to 拒绝）；桶 key 为区间命名（未命名时自动「from-to」串），边界经 `bucket.getFrom()/getTo()` 取
+- **top_hits 桶内/顶层取文档**：`EsAgg.topHits(size, cols...)`（降序）/ `topHitsAsc(...)`（升序），默认聚合名 topHits，多个时 `.as()` 区分；结果经 `EsAggResult.hits(name, Entity.class)` 反序列化为实体，terms 桶内经 `bucket.getAggs().hits(...)` 取
 - `selectOne` 命中多条直接抛异常（不静默取首条）
 - `deleteBatchIds` / `deleteByQuery` 使用 `conflicts=proceed`：删除目标刚被更新时跳过该条而非整体 409 失败
 - 主键（@TableId）同时作为 ES 文档 `_id` 与 `_source` 字段

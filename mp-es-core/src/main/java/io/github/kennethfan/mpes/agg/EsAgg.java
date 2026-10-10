@@ -21,14 +21,19 @@ public class EsAgg {
     private static final List<String> CALENDAR_INTERVALS =
             List.of("second", "minute", "hour", "day", "week", "month", "quarter", "year");
 
-    public enum Type { TERMS, AVG, MAX, MIN, SUM, STATS, CARDINALITY, DATE_HISTOGRAM, RANGE }
+    public enum Type { TERMS, AVG, MAX, MIN, SUM, STATS, CARDINALITY, DATE_HISTOGRAM, RANGE, TOP_HITS }
+
+    /** top_hits 的排序字段（property + 方向） */
+    public record TopSort(String property, boolean asc) {}
 
     private final Type type;
     private final String property;
     private final List<EsAgg> children = new ArrayList<>();
     private final List<EsAggRange> ranges = new ArrayList<>();
+    private final List<TopSort> topSorts = new ArrayList<>();
     private String name;
     private Integer size;
+    private Integer topSize;
     private String dateInterval;
     private String dateFormat;
     private Integer dateMinDocCount;
@@ -98,6 +103,35 @@ public class EsAgg {
         }
         EsAgg agg = new EsAgg(Type.RANGE, LambdaUtils.propertyName(col));
         agg.ranges.addAll(Arrays.asList(ranges));
+        return agg;
+    }
+
+    /**
+     * 取前 N 条文档（top_hits），按给定列降序（典型「每组最新/最热」），可作顶层或桶内子聚合。
+     * 无属性概念，默认聚合名 topHits，多个时用 {@link #as(String)} 区分。
+     * 结果经 {@link EsAggResult#hits(String, Class)} 反序列化为实体。
+     */
+    @SafeVarargs
+    public static <T> EsAgg topHits(int size, SFunction<T, ?>... sortCols) {
+        return topHitsInternal(size, false, sortCols);
+    }
+
+    /** 同 {@link #topHits(int, SFunction[])}，按给定列升序 */
+    @SafeVarargs
+    public static <T> EsAgg topHitsAsc(int size, SFunction<T, ?>... sortCols) {
+        return topHitsInternal(size, true, sortCols);
+    }
+
+    @SafeVarargs
+    private static <T> EsAgg topHitsInternal(int size, boolean asc, SFunction<T, ?>... sortCols) {
+        if (size <= 0) {
+            throw new IllegalArgumentException("topHits size 必须为正整数，实际 " + size);
+        }
+        EsAgg agg = new EsAgg(Type.TOP_HITS, null);
+        agg.topSize = size;
+        for (SFunction<T, ?> col : sortCols) {
+            agg.topSorts.add(new TopSort(LambdaUtils.propertyName(col), asc));
+        }
         return agg;
     }
 
@@ -180,6 +214,14 @@ public class EsAgg {
         return dateMinDocCount;
     }
 
+    public Integer getTopSize() {
+        return topSize;
+    }
+
+    public List<TopSort> getTopSorts() {
+        return topSorts;
+    }
+
     public String getProperty() {
         return property;
     }
@@ -189,6 +231,9 @@ public class EsAgg {
     }
 
     public String getName() {
-        return name != null ? name : property;
+        if (name != null) {
+            return name;
+        }
+        return property != null ? property : "topHits";
     }
 }

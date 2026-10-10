@@ -61,6 +61,25 @@ public class EsAggResult {
         return new EsStats(s.count(), s.min(), s.max(), s.avg(), s.sum());
     }
 
+    /**
+     * top_hits 取文档列表，source 反序列化为给定实体类型；不存在或非 top_hits 抛异常。
+     * 顶层聚合与 terms 桶内子聚合（bucket.getAggs().hits(...)）均可用。
+     */
+    public <T> List<T> hits(String name, Class<T> type) {
+        Aggregate agg = require(name);
+        if (agg._kind() != Aggregate.Kind.TopHits) {
+            throw new EsOpsException("聚合 " + name + " 不是 topHits 类型: " + agg._kind());
+        }
+        return agg.topHits().hits().hits().stream()
+                .map(h -> {
+                    if (h.source() == null) {
+                        throw new EsOpsException("top_hits 命中缺少 _source（聚合名 " + name + "）");
+                    }
+                    return h.source().to(type);
+                })
+                .toList();
+    }
+
     private Aggregate require(String name) {
         Aggregate agg = aggregates.get(name);
         if (agg == null) {
