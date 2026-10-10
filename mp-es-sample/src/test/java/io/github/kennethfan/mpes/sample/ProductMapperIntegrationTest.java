@@ -563,4 +563,66 @@ class ProductMapperIntegrationTest {
         assertEquals(1, both.size());
         assertEquals(ID_2, both.get(0).getId());
     }
+
+    // ---------- limit 与上限保护 ----------
+
+    @Test
+    void limitClause() {
+        seedThree();
+
+        // limit(2)：3 条命中只取前 2 条
+        List<Product> limited = mapper.selectList(new EsLambdaQueryWrapper<Product>().limit(2));
+        assertEquals(2, limited.size());
+
+        // limit 与条件组合：在售 2 条 + limit(1) → 1 条
+        List<Product> filtered = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                .eq(Product::getOnSale, true)
+                .limit(1));
+        assertEquals(1, filtered.size());
+
+        // selectHighlighted 同样生效：limit(1) 只返回 1 条高亮
+        List<EsHit<Product>> hits = mapper.selectHighlighted(
+                new EsLambdaQueryWrapper<Product>().match(Product::getDescription, "键盘").limit(1),
+                EsHighlight.of(Product::getDescription));
+        assertEquals(1, hits.size());
+    }
+
+    @Test
+    void limitValidation() {
+        // 非正数 → 构建时报错
+        assertThrows(EsOpsException.class, () -> new EsLambdaQueryWrapper<Product>().limit(0));
+        // 超出 from+size 窗口上限 10000 → 构建时报错并提示深分页
+        assertThrows(EsOpsException.class, () -> new EsLambdaQueryWrapper<Product>().limit(20000));
+    }
+
+    @Test
+    void selectListOverCapThrows() {
+        long baseId = 99000L;
+        int total = 1001;
+        try {
+            // 写入 1001 条（超出默认上限 1000）
+            List<Product> batch = new java.util.ArrayList<>();
+            for (int i = 1; i <= total; i++) {
+                batch.add(product(baseId + i, "批量商品 " + i, "压测数据 " + i,
+                        "1.00", 1, "2026-01-01", true));
+            }
+            assertEquals(total, mapper.insertBatch(batch));
+            refresh();
+
+            // 未显式 limit 且命中 1001 > 1000 → 显式报错而非静默截断
+            EsOpsException ex = assertThrows(EsOpsException.class,
+                    () -> mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                            .gt(Product::getId, baseId)));
+            assertTrue(ex.getMessage().contains("超过单次上限 1000"));
+
+            // 显式 limit(1001) → 视为已知规模，正常返回全部
+            List<Product> all = mapper.selectList(new EsLambdaQueryWrapper<Product>()
+                    .gt(Product::getId, baseId)
+                    .limit(1001));
+            assertEquals(total, all.size());
+        } finally {
+            mapper.delete(new EsLambdaQueryWrapper<Product>().gt(Product::getId, baseId));
+            refresh();
+        }
+    }
 }

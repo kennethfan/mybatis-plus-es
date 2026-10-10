@@ -53,7 +53,11 @@ public interface EsBaseMapper<T> {
     /** 条件计数，wrapper 为 null 时全量计数 */
     Long selectCount(EsLambdaQueryWrapper<T> wrapper);
 
-    /** 条件查询，wrapper 为 null 时查全量（上限 1000 条） */
+    /**
+     * 条件查询，wrapper 为 null 时查全量。默认上限 1000 条：未显式 {@code wrapper.limit(n)} 时
+     * 命中数超过 1000 直接报错（不做静默截断）；{@code limit(n)} 可放宽至 10000，
+     * 更多结果请用 {@link #selectAfter} 深分页。
+     */
     List<T> selectList(EsLambdaQueryWrapper<T> wrapper);
 
     /** 条件查单条：0 条返回 null，多条抛 {@link io.github.kennethfan.mpes.support.EsOpsException} */

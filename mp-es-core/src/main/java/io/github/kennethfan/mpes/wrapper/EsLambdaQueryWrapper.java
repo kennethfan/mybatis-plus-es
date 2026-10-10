@@ -27,6 +27,9 @@ import java.util.function.Consumer;
  */
 public class EsLambdaQueryWrapper<T> {
 
+    /** ES from+size 分页窗口上限（index.max_result_window 默认值） */
+    public static final int MAX_RESULT_WINDOW = 10_000;
+
     enum Op { EQ, NE, IN, GT, GE, LT, LE, BETWEEN, LIKE, MATCH, IS_NULL, GEO_DISTANCE, FUZZY, PREFIX }
 
     /**
@@ -58,6 +61,10 @@ public class EsLambdaQueryWrapper<T> {
 
     @Getter
     private final List<GeoDistanceSortSpec> geoSorts = new ArrayList<>();
+
+    /** 返回条数上限（仅 selectList / selectHighlighted 生效），null 表示未显式指定 */
+    @Getter
+    private Integer limit;
 
     private boolean pendingOr;
 
@@ -193,6 +200,25 @@ public class EsLambdaQueryWrapper<T> {
         pendingOr = true;
         nodes.add(new Node(true, group(consumer)));
         pendingOr = false;
+        return this;
+    }
+
+    // ---------- 返回条数 ----------
+
+    /**
+     * 限制返回条数（对应 ES size），仅 selectList / selectHighlighted 生效。
+     * 未设置时默认取 1000 条，且命中数超过 1000 将直接报错（不做静默截断）；
+     * 需要更多结果时用本方法（上限 {@value #MAX_RESULT_WINDOW}）或改用 selectAfter 深分页。
+     */
+    public EsLambdaQueryWrapper<T> limit(int n) {
+        if (n <= 0) {
+            throw new EsOpsException("limit 必须为正整数，实际 " + n);
+        }
+        if (n > MAX_RESULT_WINDOW) {
+            throw new EsOpsException("limit 超出 ES from+size 窗口上限 " + MAX_RESULT_WINDOW
+                    + "（实际 " + n + "），请改用 selectAfter 深分页");
+        }
+        this.limit = n;
         return this;
     }
 

@@ -11,6 +11,7 @@ import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.core.search.Highlight;
 import co.elastic.clients.elasticsearch.core.search.HighlightField;
 import co.elastic.clients.elasticsearch.core.search.Hit;
+import co.elastic.clients.elasticsearch.core.search.TotalHits;
 import co.elastic.clients.elasticsearch._types.Result;
 import co.elastic.clients.json.JsonData;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -43,7 +44,7 @@ import java.util.Map;
  */
 public class EsMapperProxy<T> implements InvocationHandler {
 
-    /** selectList 的全量上限 */
+    /** selectList / selectHighlighted 未显式 limit 时的默认返回上限 */
     private static final int MAX_LIST_SIZE = 1_000;
 
     private final Class<T> mapperInterface;
@@ -397,18 +398,37 @@ public class EsMapperProxy<T> implements InvocationHandler {
         Query query = EsQueryTranslator.toQuery(wrapper, fieldResolver);
         List<co.elastic.clients.elasticsearch._types.SortOptions> sorts =
                 EsQueryTranslator.toSorts(wrapper, fieldResolver);
+        Integer limit = wrapper.getLimit();
+        int size = limit != null ? limit : MAX_LIST_SIZE;
         try {
             var resp = client.search(s -> s
                             .index(metadata.getIndexName())
                             .query(query)
                             .sort(sorts)
-                            .size(MAX_LIST_SIZE)
+                            .size(size)
                             .trackTotalHits(t -> t.enabled(true)),
                     (Class<Object>) metadata.getEntityClass());
             List<?> src = resp.hits().hits().stream().map(Hit::source).toList();
+            checkListCap(wrapper, resp.hits().total(), src.size());
             return (List<E>) src;
         } catch (IOException e) {
             throw new EsOpsException("selectList 失败: " + metadata.getIndexName(), e);
+        }
+    }
+
+    /**
+     * 未显式 limit 时，命中数超过单次上限（{@value #MAX_LIST_SIZE}）即报错，
+     * 杜绝静默截断丢数据；显式 limit(n) 视为用户已知并接受的结果规模，不再拦截。
+     */
+    private void checkListCap(EsLambdaQueryWrapper<?> wrapper, TotalHits total, int fetched) {
+        if (wrapper.getLimit() != null) {
+            return;
+        }
+        long totalHits = total != null ? total.value() : fetched;
+        if (totalHits > MAX_LIST_SIZE) {
+            throw new EsOpsException("命中 " + totalHits + " 条，超过单次上限 " + MAX_LIST_SIZE
+                    + "（索引 " + metadata.getIndexName() + "）。请加 .limit(n)（上限 "
+                    + EsLambdaQueryWrapper.MAX_RESULT_WINDOW + "）或改用 selectAfter 深分页");
         }
     }
 
@@ -523,15 +543,18 @@ public class EsMapperProxy<T> implements InvocationHandler {
                 .preTags(highlight.getPreTag())
                 .postTags(highlight.getPostTag())
                 .fields(fieldSpecs));
+        Integer limit = wrapper.getLimit();
+        int size = limit != null ? limit : MAX_LIST_SIZE;
         try {
             var resp = client.search(s -> s
                             .index(metadata.getIndexName())
                             .query(query)
                             .highlight(hl)
-                            .size(MAX_LIST_SIZE)
+                            .size(size)
                             .trackTotalHits(t -> t.enabled(true)),
                     Map.class);
             List<?> src = resp.hits().hits().stream().map(this::toHit).toList();
+            checkListCap(wrapper, resp.hits().total(), src.size());
             return (List<EsHit<E>>) src;
         } catch (IOException e) {
             throw new EsOpsException("selectHighlighted 失败: " + metadata.getIndexName(), e);
